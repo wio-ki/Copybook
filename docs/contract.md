@@ -14,7 +14,7 @@ Windows 10/11 only. No macOS or Linux code paths.
 | --- | --- |
 | productName | `Copybook` |
 | identifier | `io.github.wio-ki.copybook` |
-| version | `0.1.0` (single source: `package.json`, `tauri.conf.json` reads it) |
+| version | `1.1.0` (single source: `package.json`, `tauri.conf.json` reads it) |
 | data dir | Tauri `app_data_dir()` = `%APPDATA%\io.github.wio-ki.copybook\` |
 | database | `<data>\copybook.db` (SQLite, WAL) |
 | settings | `<data>\settings.json` |
