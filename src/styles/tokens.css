@@ -1,0 +1,143 @@
+/*
+ * Copybook design tokens.
+ *
+ * Paper, ink and a seal: warm paper surfaces (60), ink for text and primary actions (30),
+ * vermilion only for marks — the selection stamp, favourites, the active tab (10).
+ * Dense tool UI, so a 4 px half-step grid and a 1.2 type scale on a 13 px body
+ * (11 / 12 / 13 / 15.5 / 19 / 27), 12 px being the half step for UI chrome.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* surfaces */
+  --bg: hsl(40 33% 97%);
+  --bg-raised: hsl(40 40% 99.4%);
+  --bg-sunken: hsl(40 22% 94%);
+  --bg-hover: hsl(40 20% 93%);
+  --bg-active: hsl(40 17% 89%);
+  --rule: hsl(40 12% 86%);
+  --rule-strong: hsl(40 9% 77%);
+
+  /* ink */
+  --ink: hsl(222 18% 14%);
+  --ink-2: hsl(222 8% 33%);
+  --ink-3: hsl(222 6% 44%);
+  --ink-4: hsl(222 5% 62%);
+
+  /* seal */
+  --accent: hsl(9 58% 46%);
+  --accent-text: hsl(9 62% 40%);
+  --on-accent: hsl(0 0% 100%);
+  --accent-soft: hsl(9 58% 46% / 0.1);
+
+  --primary: var(--ink);
+  --on-primary: hsl(40 33% 97%);
+  --danger: hsl(354 62% 42%);
+  --danger-soft: hsl(354 62% 42% / 0.08);
+  --success: hsl(152 42% 30%);
+
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px hsl(9 58% 46% / 0.55);
+  --shadow-pop: 0 12px 32px -8px hsl(222 30% 10% / 0.22), 0 2px 6px hsl(222 30% 10% / 0.08);
+  --checker: hsl(40 12% 88%);
+
+  /* type */
+  --font-ui: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei',
+    system-ui, sans-serif;
+  --font-small: 'Segoe UI Variable Small', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei',
+    system-ui, sans-serif;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI', 'Microsoft YaHei UI',
+    'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, 'Microsoft YaHei UI', monospace;
+
+  --fs-1: 11px;
+  --fs-2: 12px;
+  --fs-3: 13px;
+  --fs-4: 15.5px;
+  --fs-5: 19px;
+  --fs-6: 27px;
+
+  /* space (4 px half steps) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+
+  --r-1: 4px;
+  --r-2: 6px;
+  --r-3: 8px;
+
+  /* motion: feedback only */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --t-1: 120ms;
+  --t-2: 180ms;
+  --t-3: 240ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --bg: hsl(222 10% 12%);
+    --bg-raised: hsl(222 9% 16%);
+    --bg-sunken: hsl(222 11% 9.5%);
+    --bg-hover: hsl(222 9% 16.5%);
+    --bg-active: hsl(222 9% 21%);
+    --rule: hsl(0 0% 100% / 0.075);
+    --rule-strong: hsl(0 0% 100% / 0.14);
+
+    --ink: hsl(40 22% 91%);
+    --ink-2: hsl(40 7% 73%);
+    --ink-3: hsl(222 6% 60%);
+    --ink-4: hsl(222 5% 43%);
+
+    --accent: hsl(10 64% 60%);
+    --accent-text: hsl(10 72% 68%);
+    --on-accent: hsl(222 14% 10%);
+    --accent-soft: hsl(10 64% 60% / 0.14);
+
+    --on-primary: hsl(222 10% 12%);
+    --danger: hsl(356 70% 64%);
+    --danger-soft: hsl(356 70% 64% / 0.12);
+    --success: hsl(150 40% 60%);
+
+    --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px hsl(10 64% 60% / 0.6);
+    --shadow-pop: 0 16px 40px -8px hsl(0 0% 0% / 0.55), 0 0 0 1px hsl(0 0% 100% / 0.07);
+    --checker: hsl(222 8% 18%);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: hsl(222 10% 12%);
+  --bg-raised: hsl(222 9% 16%);
+  --bg-sunken: hsl(222 11% 9.5%);
+  --bg-hover: hsl(222 9% 16.5%);
+  --bg-active: hsl(222 9% 21%);
+  --rule: hsl(0 0% 100% / 0.075);
+  --rule-strong: hsl(0 0% 100% / 0.14);
+
+  --ink: hsl(40 22% 91%);
+  --ink-2: hsl(40 7% 73%);
+  --ink-3: hsl(222 6% 60%);
+  --ink-4: hsl(222 5% 43%);
+
+  --accent: hsl(10 64% 60%);
+  --accent-text: hsl(10 72% 68%);
+  --on-accent: hsl(222 14% 10%);
+  --accent-soft: hsl(10 64% 60% / 0.14);
+
+  --on-primary: hsl(222 10% 12%);
+  --danger: hsl(356 70% 64%);
+  --danger-soft: hsl(356 70% 64% / 0.12);
+  --success: hsl(150 40% 60%);
+
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px hsl(10 64% 60% / 0.6);
+  --shadow-pop: 0 16px 40px -8px hsl(0 0% 0% / 0.55), 0 0 0 1px hsl(0 0% 100% / 0.07);
+  --checker: hsl(222 8% 18%);
+}

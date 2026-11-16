@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.local
+*.log
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# local notes
+.review/
+.vscode/*
+!.vscode/extensions.json
+.idea/
