@@ -219,6 +219,71 @@ export function Panel() {
     void api.setPanelLocked(next).catch(() => setLocked(!next));
   }, [locked]);
 
+  const [clearing, setClearing] = useState(false);
+  const [keepMarked, setKeepMarked] = useState(true);
+  const [toDelete, setToDelete] = useState<number | null>(null);
+  const [clearBusy, setClearBusy] = useState(false);
+
+  const openClear = useCallback(() => {
+    setClearing(true);
+    setToDelete(null);
+    api
+      .getStats()
+      .then((s) => setToDelete(keepMarked ? s.total - s.marked : s.total))
+      .catch(() => setToDelete(null));
+  }, [keepMarked]);
+
+  const toggleKeepMarked = useCallback(() => {
+    const next = !keepMarked;
+    setKeepMarked(next);
+    setToDelete(null);
+    api
+      .getStats()
+      .then((s) => setToDelete(next ? s.total - s.marked : s.total))
+      .catch(() => setToDelete(null));
+  }, [keepMarked]);
+
+  const runClear = useCallback(async () => {
+    if (clearBusy) return;
+    setClearBusy(true);
+    try {
+      const count = await api.clearHistory(keepMarked);
+      setClearing(false);
+      setDetailId(null);
+      setSelectedId(null);
+      showToast(t.toast.cleared(formatNumber(count, lang)));
+      void refresh();
+    } catch (e) {
+      showToast(errorText(e));
+    } finally {
+      setClearBusy(false);
+    }
+  }, [clearBusy, keepMarked, showToast, t, lang, refresh, errorText]);
+
+  const clearRef = useRef<HTMLDivElement>(null);
+
+  // A click anywhere else, or Escape, puts the confirmation away.
+  useEffect(() => {
+    if (!clearing) return;
+    const onDown = (e: PointerEvent) => {
+      if (!clearRef.current?.contains(e.target as Node)) setClearing(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setClearing(false);
+        focusSearch();
+      }
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [clearing, focusSearch]);
+
   const hide = useCallback(() => void api.hidePanel(true), []);
 
   // ---- keyboard -------------------------------------------------------------------------
@@ -241,7 +306,7 @@ export function Panel() {
 
   const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
   onKey.current = (e: KeyboardEvent) => {
-    if (e.isComposing || e.keyCode === 229 || menu) return;
+    if (e.isComposing || e.keyCode === 229 || menu || clearing) return;
     const mod = e.ctrlKey || e.metaKey;
     const target = e.target as HTMLElement | null;
     const inTextarea = target?.tagName === 'TEXTAREA';
@@ -490,6 +555,44 @@ export function Panel() {
           />
         </label>
         <div className="head-tools">
+          <div className="clear-wrap" ref={clearRef}>
+            <button
+              type="button"
+              className={`icon-btn icon-btn--danger${clearing ? ' is-on-ink' : ''}`}
+              title={t.panel.clear}
+              aria-label={t.panel.clear}
+              aria-expanded={clearing}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => (clearing ? setClearing(false) : openClear())}
+            >
+              <Trash2 size={15} strokeWidth={1.75} />
+            </button>
+            {clearing && (
+              <div className="clear-pop" role="dialog" aria-label={t.panel.clear}>
+                <p className="clear-title">{t.panel.clear}</p>
+                <label className="clear-keep">
+                  <input type="checkbox" checked={keepMarked} onChange={toggleKeepMarked} />
+                  <span>{t.panel.clearKeep}</span>
+                </label>
+                <p className="clear-text">
+                  {toDelete == null ? '…' : t.panel.clearConfirm(formatNumber(toDelete, lang))}
+                </p>
+                <div className="clear-actions">
+                  <button type="button" className="btn btn--quiet" onClick={() => setClearing(false)}>
+                    {t.panel.cancel}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--danger"
+                    onClick={() => void runClear()}
+                    disabled={clearBusy || toDelete === 0}
+                  >
+                    {t.panel.clearAction}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
           <button
             type="button"
             className={`icon-btn${locked ? ' is-on-ink' : ''}`}

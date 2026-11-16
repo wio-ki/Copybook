@@ -16,6 +16,28 @@ use windows::{
     },
 };
 
+/// An unassigned virtual key, injected only to release the foreground lock or to break the
+/// "Win was tapped alone" gesture. Unlike F24 it is not a real function key, so no other
+/// program reacts to it.
+pub const VK_PLACEHOLDER: VIRTUAL_KEY = VIRTUAL_KEY(0xE8);
+/// True when the image matches one of the screen sizes exactly, the shape of a raw screenshot
+/// of the whole display.
+pub fn full_screen(pixels: &image::RgbaImage) -> bool {
+    let (w, h) = (
+        i32::try_from(pixels.width()).unwrap_or(i32::MAX),
+        i32::try_from(pixels.height()).unwrap_or(i32::MAX),
+    );
+    // SAFETY: querying the display metrics has no side effects and no arguments.
+    let virtual_size = unsafe {
+        (
+            GetSystemMetrics(SM_CXVIRTUALSCREEN),
+            GetSystemMetrics(SM_CYVIRTUALSCREEN),
+        )
+    };
+    // SAFETY: as above, indexes are the documented metric constants.
+    let primary = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
+    (w, h) == virtual_size || (w, h) == primary
+}
 pub fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }
@@ -105,8 +127,9 @@ pub fn force_foreground(window: HWND) -> bool {
         if GetForegroundWindow() == window {
             return true;
         }
-        // A balanced, otherwise unused F24 press releases the foreground lock without modifiers.
-        let keys = [key(VK_F24, false), key(VK_F24, true)];
+        // A balanced placeholder press releases the foreground lock without modifiers and
+        // without any other program mistaking it for a real key.
+        let keys = [key(VK_PLACEHOLDER, false), key(VK_PLACEHOLDER, true)];
         let _ = SendInput(&keys, std::mem::size_of::<INPUT>() as i32);
         let _ = SetForegroundWindow(window);
         GetForegroundWindow() == window

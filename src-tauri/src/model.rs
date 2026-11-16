@@ -160,6 +160,15 @@ pub struct AppInfo {
     pub elevated: bool,
 }
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    pub current: String,
+    pub latest: String,
+    pub newer: bool,
+    pub url: String,
+    pub installer: Option<String>,
+}
+#[derive(Debug, Serialize)]
 pub struct SeenApp {
     #[serde(flatten)]
     pub source: SourceApp,

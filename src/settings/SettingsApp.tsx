@@ -7,13 +7,14 @@ import {
   Minus,
   Plus,
   Radio,
+  RefreshCw,
   SlidersHorizontal,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, assetUrl, toCmdError } from '../shared/api';
 import { useApp } from '../shared/app';
-import type { AppInfo, SeenApp, Settings, SettingsSection, Stats } from '../shared/contract';
+import type { AppInfo, SeenApp, Settings, SettingsSection, Stats, UpdateInfo } from '../shared/contract';
 import { formatBytes, formatNumber } from '../shared/format';
 import { Seal } from '../shared/Seal';
 import { Toast, useToast } from '../shared/Toast';
@@ -71,7 +72,7 @@ export function SettingsApp() {
       case 'paste':
         return <Paste settings={settings} save={save} />;
       case 'data':
-        return <Data notify={show} />;
+        return <Data />;
       case 'about':
         return <About />;
     }
@@ -435,13 +436,11 @@ function Paste({ settings, save }: { settings: Settings; save: SaveFn }) {
 
 // ---- Data -----------------------------------------------------------------------------
 
-function Data({ notify }: { notify: (text: string) => void }) {
+function Data() {
   const { t, lang } = useApp();
   const d = t.settings.data;
   const [stats, setStats] = useState<Stats | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
-  const [confirming, setConfirming] = useState(false);
-  const [keepMarked, setKeepMarked] = useState(true);
   const n = (v: number) => formatNumber(v, lang);
 
   const load = useCallback(() => {
@@ -454,19 +453,6 @@ function Data({ notify }: { notify: (text: string) => void }) {
     const off = api.on('history://changed', load);
     return () => void off.then((f) => f());
   }, [load]);
-
-  const toDelete = stats ? (keepMarked ? stats.total - stats.marked : stats.total) : 0;
-
-  const clear = async () => {
-    try {
-      const count = await api.clearHistory(keepMarked);
-      setConfirming(false);
-      notify(d.cleared(n(count)));
-      load();
-    } catch (e) {
-      notify(t.errors[toCmdError(e).code] ?? t.toast.failed);
-    }
-  };
 
   const tiles: [string, ReactNode][] = stats
     ? [
@@ -510,33 +496,6 @@ function Data({ notify }: { notify: (text: string) => void }) {
           </div>
         </div>
       </Group>
-
-      <Group title={d.danger}>
-        <Row label={d.clear} hint={d.clearHint}>
-          {!confirming && (
-            <button type="button" className="btn btn--danger-outline" onClick={() => setConfirming(true)} disabled={!stats?.total}>
-              {d.clear}…
-            </button>
-          )}
-        </Row>
-        {confirming && (
-          <div className="confirm" role="alertdialog" aria-label={d.clear}>
-            <label className="check">
-              <input type="checkbox" checked={keepMarked} onChange={(e) => setKeepMarked(e.target.checked)} />
-              <span>{d.keepMarked}</span>
-            </label>
-            <p className="confirm-text">{d.clearConfirm(n(toDelete))}</p>
-            <div className="confirm-actions">
-              <button type="button" className="btn" onClick={() => setConfirming(false)} autoFocus>
-                {d.cancel}
-              </button>
-              <button type="button" className="btn btn--danger" onClick={() => void clear()} disabled={toDelete === 0}>
-                {d.clearAction}
-              </button>
-            </div>
-          </div>
-        )}
-      </Group>
     </>
   );
 }
@@ -547,9 +506,26 @@ function About() {
   const { t } = useApp();
   const a = t.settings.about;
   const [info, setInfo] = useState<AppInfo | null>(null);
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     api.getAppInfo().then(setInfo).catch(() => {});
   }, []);
+
+  const check = async () => {
+    if (checking) return;
+    setChecking(true);
+    setFailed(false);
+    try {
+      setUpdate(await api.checkUpdate());
+    } catch {
+      setUpdate(null);
+      setFailed(true);
+    } finally {
+      setChecking(false);
+    }
+  };
 
   const links: [string, string][] = [
     [a.repo, REPO],
@@ -564,6 +540,31 @@ function About() {
       <p className="about-version tnum">{info ? a.version(info.version) : ' '}</p>
       <p className="about-tagline">{a.tagline}</p>
       {info?.elevated && <p className="about-badge">{a.elevated}</p>}
+      <div className="about-update">
+        <button type="button" className="btn" onClick={() => void check()} disabled={checking}>
+          <RefreshCw size={14} strokeWidth={1.75} aria-hidden="true" className={checking ? 'is-spinning' : ''} />
+          {checking ? a.checking : a.check}
+        </button>
+        {failed && (
+          <p className="about-update-note is-error" role="status">
+            {a.updateFailed}
+          </p>
+        )}
+        {update &&
+          (update.newer ? (
+            <p className="about-update-note" role="status">
+              {a.available(update.latest)}
+              <button type="button" className="link" onClick={() => void api.openUrl(update.installer ?? update.url)}>
+                {update.installer ? a.download : a.releasePage}
+                <ExternalLink size={12} strokeWidth={1.75} aria-hidden="true" />
+              </button>
+            </p>
+          ) : (
+            <p className="about-update-note is-quiet" role="status">
+              {a.upToDate}
+            </p>
+          ))}
+      </div>
       <ul className="about-links">
         {links.map(([label, url]) => (
           <li key={url}>

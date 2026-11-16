@@ -15,7 +15,7 @@ use windows::Win32::{
 type Toggle = Arc<dyn Fn() + Send + Sync>;
 thread_local! {
     static TOGGLE:RefCell<Option<Toggle>>=const{RefCell::new(None)};
-    static HELD:RefCell<bool>=const{RefCell::new(false)};
+    static CONSUMED:RefCell<bool>=const{RefCell::new(false)};
 }
 unsafe extern "system" fn keyboard(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
@@ -26,32 +26,50 @@ unsafe extern "system" fn keyboard(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
             return unsafe { CallNextHookEx(None, code, w, l) };
         }
         if event.vkCode == u32::from(VK_V.0) {
-            let up = event.flags.contains(LLKHF_UP);
+            let down = w.0 as u32 == WM_KEYDOWN || w.0 as u32 == WM_SYSKEYDOWN;
+            let up = w.0 as u32 == WM_KEYUP || w.0 as u32 == WM_SYSKEYUP;
             // SAFETY: valid key constants, read-only keyboard state query.
             let win = unsafe {
                 GetAsyncKeyState(i32::from(VK_LWIN.0)) < 0
                     || GetAsyncKeyState(i32::from(VK_RWIN.0)) < 0
             };
-            let was = HELD.with(|held| *held.borrow());
-            if win || was {
-                if !up && !was {
-                    HELD.with(|held| *held.borrow_mut() = true);
-                    // Balanced unused key prevents the bare Win key from opening Start on release.
-                    // SAFETY: correctly sized INPUTs contain a balanced F24 pair, no modifiers.
-                    unsafe {
-                        let _ = SendInput(
-                            &[platform::key(VK_F24, false), platform::key(VK_F24, true)],
-                            std::mem::size_of::<INPUT>() as i32,
-                        );
-                    }
-                    TOGGLE.with(|toggle| {
-                        if let Some(toggle) = toggle.borrow().as_ref() {
-                            toggle();
-                        }
-                    });
+            // Only the bare chord belongs to us: Win+Ctrl+V, Win+Shift+V and Win+Alt+V are
+            // shortcuts of other applications and must reach them untouched.
+            let others = unsafe {
+                [VK_CONTROL, VK_MENU, VK_SHIFT]
+                    .iter()
+                    .any(|k| GetAsyncKeyState(i32::from(k.0)) < 0)
+            };
+            if others {
+                // SAFETY: forward the unmodified callback arguments; null hook is permitted.
+                return unsafe { CallNextHookEx(None, code, w, l) };
+            }
+            let consumed = CONSUMED.with(|c| *c.borrow());
+            if down && win && !consumed {
+                CONSUMED.with(|c| *c.borrow_mut() = true);
+                // Balanced placeholder keeps the bare Win key from opening Start on release.
+                // SAFETY: correctly sized INPUTs contain a balanced placeholder pair.
+                unsafe {
+                    let _ = SendInput(
+                        &[
+                            platform::key(platform::VK_PLACEHOLDER, false),
+                            platform::key(platform::VK_PLACEHOLDER, true),
+                        ],
+                        std::mem::size_of::<INPUT>() as i32,
+                    );
                 }
+                TOGGLE.with(|toggle| {
+                    if let Some(toggle) = toggle.borrow().as_ref() {
+                        toggle();
+                    }
+                });
+                return LRESULT(1);
+            }
+            // Auto-repeat while held, and the matching key-up, are swallowed so the target
+            // never sees an unmatched V. A key-up without a consumed key-down passes through.
+            if consumed && (down || up) {
                 if up {
-                    HELD.with(|held| *held.borrow_mut() = false);
+                    CONSUMED.with(|c| *c.borrow_mut() = false);
                 }
                 return LRESULT(1);
             }

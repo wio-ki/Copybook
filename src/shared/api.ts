@@ -13,6 +13,7 @@ import type {
   Settings,
   SettingsSection,
   Stats,
+  UpdateInfo,
 } from './contract';
 
 /** Everything the UI may ask of the backend. Mirrors section 5 of docs/contract.md. */
@@ -41,6 +42,7 @@ export interface Backend {
   revealPath(path: string): Promise<void>;
   openDataDir(): Promise<void>;
   getAppInfo(): Promise<AppInfo>;
+  checkUpdate(): Promise<UpdateInfo>;
   on<E extends keyof EventMap>(event: E, handler: (payload: EventMap[E]) => void): Promise<() => void>;
   /** URL for a file under the data dir (images, app icons). */
   assetUrl(path: string): string;
@@ -57,6 +59,7 @@ const ERROR_CODES: readonly ErrorCode[] = [
   'hotkey_conflict',
   'io',
   'db',
+  'network',
   'internal',
 ];
 
@@ -107,6 +110,7 @@ async function createTauriBackend(): Promise<Backend> {
     revealPath: (path) => call('reveal_path', { path }),
     openDataDir: () => call('open_data_dir'),
     getAppInfo: () => call('get_app_info'),
+    checkUpdate: () => call('check_update'),
     on: (event, handler) => listen(event, (e) => handler(e.payload as never)),
     assetUrl: (path) => convertFileSrc(path),
     minimizeWindow: () => getCurrentWindow().minimize(),

@@ -21,6 +21,13 @@ use windows::Win32::{
 };
 
 static IN_SIZE_MOVE: AtomicBool = AtomicBool::new(false);
+/// True while the panel is on screen. Capture skips full-screen images taken meanwhile: a
+/// screenshot triggered while the panel is in front only ever shows the panel itself.
+static PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
+
+pub fn panel_visible() -> bool {
+    PANEL_VISIBLE.load(Ordering::Relaxed)
+}
 #[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WindowState {
     pub x: Option<i32>,
@@ -186,6 +193,7 @@ pub fn show(app: &AppHandle) -> Result<()> {
         p.locked
     };
     panel.show().map_err(|_| CmdError::internal())?;
+    PANEL_VISIBLE.store(true, Ordering::Relaxed);
     let hwnd = panel.hwnd().map_err(|_| CmdError::internal())?;
     if !platform::force_foreground(platform::hwnd(hwnd.0 as isize)) {
         return Err(CmdError::new("internal", "Panel did not receive focus"));
@@ -197,6 +205,7 @@ pub fn show(app: &AppHandle) -> Result<()> {
 }
 pub fn hide(app: &AppHandle, restore: bool) -> Result<()> {
     let panel = panel(app)?;
+    PANEL_VISIBLE.store(false, Ordering::Relaxed);
     panel.hide().map_err(|_| CmdError::internal())?;
     let state = app.state::<AppState>();
     let target = {

@@ -11,6 +11,7 @@ mod settings;
 mod shell;
 mod state;
 mod storage;
+mod update;
 mod window;
 
 use model::{CmdError, Result};
@@ -135,7 +136,8 @@ pub fn run() {
             commands::open_path,
             commands::reveal_path,
             commands::open_data_dir,
-            commands::get_app_info
+            commands::get_app_info,
+            commands::check_update
         ])
         .setup(move |app| {
             let dir = match &override_dir {

@@ -66,6 +66,71 @@
   gap: 2px;
 }
 
+/* Clear-history control: its confirmation hangs off the button, inside the panel. */
+.clear-wrap {
+  position: relative;
+  display: flex;
+}
+
+.clear-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  width: 216px;
+  padding: var(--s-3);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-3);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-pop);
+  transform-origin: top right;
+  animation: menu-in var(--t-1) var(--ease-out);
+}
+
+.clear-title {
+  margin: 0;
+  font-family: var(--font-small);
+  font-size: var(--fs-1);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
+.clear-keep {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--fs-3);
+  color: var(--ink-2);
+}
+
+.clear-keep input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+.clear-text {
+  margin: 0;
+  font-size: var(--fs-2);
+  color: var(--ink-2);
+}
+
+.clear-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  padding-top: var(--s-1);
+}
+
+.clear-actions .btn {
+  height: 26px;
+}
+
 /* ---- tabs ----------------------------------------------------------------------------- */
 
 .tabs {
@@ -215,7 +280,7 @@
 .row-body {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--s-2);
   overflow: hidden;
 }
 
@@ -384,7 +449,6 @@ li.file-more {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  margin-top: 1px;
   font-family: var(--font-small);
   font-size: var(--fs-1);
   line-height: 16px;

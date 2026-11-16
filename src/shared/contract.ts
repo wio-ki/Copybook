@@ -82,6 +82,14 @@ export interface Stats {
   imageBytes: number;
 }
 
+export interface UpdateInfo {
+  current: string;
+  latest: string;
+  newer: boolean;
+  url: string;
+  installer: string | null;
+}
+
 export interface AppInfo {
   version: string;
   dataDir: string;
@@ -128,6 +136,7 @@ export type ErrorCode =
   | 'hotkey_conflict'
   | 'io'
   | 'db'
+  | 'network'
   | 'internal';
 
 export interface CmdError {

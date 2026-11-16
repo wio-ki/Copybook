@@ -172,6 +172,15 @@ pub async fn open_data_dir(app: AppHandle) -> Result<()> {
     })
     .await
 }
+/// Asks GitHub for the newest release. Only a click reaches the network, so this is a plain
+/// blocking call on Tauri's worker pool rather than anything scheduled.
+#[tauri::command]
+pub async fn check_update(app: AppHandle) -> Result<UpdateInfo> {
+    let current = app.package_info().version.to_string();
+    tauri::async_runtime::spawn_blocking(move || crate::update::check(&current))
+        .await
+        .map_err(|_| CmdError::internal())?
+}
 #[tauri::command]
 pub fn get_app_info(app: AppHandle) -> Result<AppInfo> {
     Ok(AppInfo {

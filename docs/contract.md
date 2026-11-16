@@ -166,6 +166,14 @@ interface AppInfo {
   elevated: boolean;   // Copybook itself runs as administrator
 }
 
+interface UpdateInfo {
+  current: string;     // running version, e.g. "1.0.0"
+  latest: string;      // newest published release tag without the "v", e.g. "1.1.0"
+  newer: boolean;      // true when latest is a strictly higher version than current
+  url: string;         // the release page on GitHub
+  installer: string | null;  // direct download of the NSIS installer, when the release has one
+}
+
 interface SeenApp extends SourceApp { count: number }   // distinct sources in history
 
 interface Settings {
@@ -193,7 +201,7 @@ interface Settings {
 }
 
 interface CmdError {
-  code: 'not_found' | 'invalid' | 'hotkey_invalid' | 'hotkey_conflict' | 'io' | 'db' | 'internal';
+  code: 'not_found' | 'invalid' | 'hotkey_invalid' | 'hotkey_conflict' | 'io' | 'db' | 'network' | 'internal';
   message: string;     // English, for logs; the UI maps code to its own text
 }
 ```
@@ -293,6 +301,7 @@ Panel keyboard (frontend): quick paste is `Ctrl+1..9` or `Ctrl+Shift+1..9`; some
 | `reveal_path` | `{ path }` | `void` | Explorer with the item selected |
 | `open_data_dir` | `{}` | `void` | |
 | `get_app_info` | `{}` | `AppInfo` | |
+| `check_update` | `{}` | `UpdateInfo` | asks the GitHub Releases API for the newest release; never downloads or installs anything itself; network failures are `network` |
 
 ### Search (`list_items`)
 
@@ -335,11 +344,22 @@ Panel keyboard (frontend): quick paste is `Ctrl+1..9` or `Ctrl+Shift+1..9`; some
 * **Global hotkey** via `tauri-plugin-global-shortcut`: register `settings.hotkey` at start;
   pressing it toggles the panel. A failed registration at start is logged, not fatal.
 * **Win+V** (`winV`): a `WH_KEYBOARD_LL` hook, installed only while the setting is on, that
-  swallows V while a Win key is down, keeps the Start menu from opening, and toggles the panel.
+  takes over the bare chord only — V with a Win key held and no Ctrl, Alt or Shift, so that
+  other applications' Win+Ctrl+V / Win+Shift+V style shortcuts still reach them. It swallows
+  the V key-down (and its repeat and matching key-up), keeps the Start menu from opening by
+  injecting a balanced pair of an unassigned virtual key (0xE8, never F24: F24 is a real
+  function key that other programs react to), and toggles the panel.
 * **Tray**: icon `icons/tray.png` (paused: `icons/tray-paused.png`), tooltip `Copybook`.
   Left click toggles the panel. Menu, in the settings language (`system` follows the OS UI
   language: Chinese if it starts with `zh`, else English):
   `打开面板 / Open panel` (shows the hotkey), `暂停记录 / Pause capture` (check item),
   `偏好设置… / Preferences…`, separator, `退出 / Quit`.
+* **Update check** (`check_update`, user-triggered only): `GET
+  https://api.github.com/repos/wio-ki/Copybook/releases/latest` with a `User-Agent` header, a
+  connect and total timeout of about 8 s. Read `tag_name` and `html_url`; take the asset whose
+  name ends in `-setup.exe` as `installer`. Strip a leading `v` from the tag, then compare
+  dotted numeric versions component by component (`newer` is a strict greater-than; a
+  pre-release suffix such as `-beta.1` sorts below its release). Any transport, TLS, HTTP or
+  JSON problem is `network`. Nothing is sent on a timer: only a click reaches GitHub.
 * **Autostart** via `tauri-plugin-autostart` (HKCU Run). Starting at login never shows a window.
 * **Single instance** via `tauri-plugin-single-instance`: a second launch shows the panel.

@@ -383,6 +383,19 @@ export function createMockBackend(): Backend {
         elevated: false,
       });
     },
+    // Dev-only: `?update=1` offers a newer release, `?update=none` the up-to-date answer.
+    async checkUpdate() {
+      const newer = new URLSearchParams(location.search).get('update') !== 'none';
+      return delay({
+        current: '0.1.0',
+        latest: newer ? '0.2.0' : '0.1.0',
+        newer,
+        url: 'https://github.com/wio-ki/Copybook/releases',
+        installer: newer
+          ? 'https://github.com/wio-ki/Copybook/releases/download/v0.2.0/Copybook_0.2.0_x64-setup.exe'
+          : null,
+      });
+    },
     async on(event, handler) {
       const set = listeners.get(event) ?? new Set();
       set.add(handler as (p: unknown) => void);

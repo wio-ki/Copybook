@@ -485,6 +485,17 @@ impl Pipeline {
                                     return Ok(());
                                 };
                                 capture.source = platform::source(pid, &dir);
+                                // A screenshot taken while the panel is up only ever captures the
+                                // panel itself, so it is never worth keeping. Such tools often
+                                // write the image from a helper process that leaves no owner, so
+                                // the rule only fires for an unknown source at full-screen size.
+                                if capture.kind == ClipKind::Image
+                                    && capture.source.is_none()
+                                    && crate::window::panel_visible()
+                                    && capture.pixels.as_ref().is_some_and(platform::full_screen)
+                                {
+                                    return Ok(());
+                                }
                                 if capture.source.as_ref().is_some_and(|s| {
                                     settings
                                         .ignored_apps
