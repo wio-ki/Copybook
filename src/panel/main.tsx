@@ -12,6 +12,17 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+// Tauri maximizes on a double-click in a drag region; the panel should only move.
+window.addEventListener(
+  'mousedown',
+  (e) => {
+    if (e.detail > 1 && (e.target as HTMLElement | null)?.closest('[data-tauri-drag-region]')) {
+      e.stopImmediatePropagation();
+    }
+  },
+  true,
+);
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AppProvider>

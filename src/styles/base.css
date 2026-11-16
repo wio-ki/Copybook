@@ -56,10 +56,29 @@ img {
   box-shadow: var(--focus-ring);
 }
 
-/* thin, quiet scrollbars that only darken under the pointer */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--rule-strong) transparent;
+/* thin, quiet scrollbars without arrow buttons (WebView2 otherwise draws classic ones) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--rule-strong) content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--ink-4);
 }
 
 .mono {

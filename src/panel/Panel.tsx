@@ -280,9 +280,12 @@ export function Panel() {
       return;
     }
 
-    if (mod && /^Digit[1-9]$/.test(e.code) && !detail) {
+    // Ctrl+1..9 or Ctrl+Shift+1..9: some apps hold Ctrl+1..3 as global hotkeys and eat them.
+    const digit =
+      /^Digit([1-9])$/.exec(e.code)?.[1] ?? (!e.shiftKey && /^[1-9]$/.test(e.key) ? e.key : null);
+    if (mod && digit && !detail) {
       e.preventDefault();
-      const nth = items[Number(e.code.slice(5)) - 1];
+      const nth = items[Number(digit) - 1];
       if (nth) void paste(nth, e.shiftKey);
       return;
     }

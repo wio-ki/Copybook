@@ -1,4 +1,4 @@
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import type {
   AppInfo,
   ClipItem,
@@ -71,7 +71,6 @@ export function toCmdError(e: unknown): CmdError {
 }
 
 async function createTauriBackend(): Promise<Backend> {
-  const { invoke } = await import('@tauri-apps/api/core');
   const { listen } = await import('@tauri-apps/api/event');
   const { getCurrentWindow } = await import('@tauri-apps/api/window');
 
