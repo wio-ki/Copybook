@@ -26,7 +26,7 @@ const appIcon = (letter: string, bg: string, fg = '#fff') =>
   );
 
 const APPS: Record<string, SourceApp> = {
-  code: { name: 'Visual Studio Code', exe: 'Code.exe', icon: appIcon('</>', '#1f6fb2') },
+  code: { name: 'Visual Studio Code', exe: 'Code.exe', icon: appIcon('{ }', '#1f6fb2') },
   edge: { name: 'Microsoft Edge', exe: 'msedge.exe', icon: appIcon('e', '#0f7a6b') },
   wechat: { name: '微信', exe: 'Weixin.exe', icon: appIcon('微', '#22a845') },
   explorer: { name: '文件资源管理器', exe: 'explorer.exe', icon: appIcon('▤', '#d8a12a') },
@@ -186,9 +186,21 @@ const SEED: ClipItem[] = [
 ];
 
 export function createMockBackend(): Backend {
-  let items = SEED.map((i) => ({ ...i }));
-  let settings: Settings = { ...DEFAULT_SETTINGS };
-  let paused = false;
+  // Dev-only URL switches for screenshots: ?empty=1&paused=1&density=compact&theme=dark&lang=en-US
+  const params = new URLSearchParams(location.search);
+  let items = params.has('empty') ? [] : SEED.map((i) => ({ ...i }));
+  let settings: Settings = {
+    ...DEFAULT_SETTINGS,
+    ...(params.get('density') === 'compact' ? { density: 'compact' as const } : {}),
+    ...(params.get('theme') === 'dark' || params.get('theme') === 'light'
+      ? { theme: params.get('theme') as 'dark' | 'light' }
+      : {}),
+    ...(params.get('lang') === 'en-US' || params.get('lang') === 'zh-CN'
+      ? { language: params.get('lang') as 'en-US' | 'zh-CN' }
+      : {}),
+    ...(params.has('plain') ? { pastePlain: true } : {}),
+  };
+  let paused = params.has('paused');
   const listeners = new Map<string, Set<(p: unknown) => void>>();
 
   const emit = <E extends keyof EventMap>(event: E, payload: EventMap[E]) => {
@@ -307,6 +319,8 @@ export function createMockBackend(): Backend {
         image: items.filter((i) => i.kind === 'image').length,
         files: items.filter((i) => i.kind === 'files').length,
         favorite: items.filter((i) => i.favorite).length,
+        pinned: items.filter((i) => i.pinned).length,
+        marked: items.filter((i) => i.favorite || i.pinned).length,
         dbBytes: 2_621_440,
         imageBytes: 14_903_296,
       });

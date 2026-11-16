@@ -1,0 +1,194 @@
+/* Components shared by the panel and the settings window. */
+
+/* ---- icon buttons --------------------------------------------------------------------- */
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--ink-3);
+  transition:
+    background-color var(--t-1) var(--ease-out),
+    color var(--t-1) var(--ease-out);
+}
+
+.icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+.icon-btn:active {
+  background: var(--bg-active);
+  transform: scale(0.96);
+}
+
+.icon-btn--sm {
+  width: 24px;
+  height: 24px;
+}
+
+.icon-btn.is-on {
+  color: var(--accent);
+}
+
+.icon-btn.is-on svg {
+  fill: currentColor;
+}
+
+.icon-btn.is-on-ink {
+  color: var(--ink);
+  background: var(--bg-active);
+}
+
+.icon-btn--danger:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* ---- buttons -------------------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 var(--s-3);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-2);
+  background: var(--bg-raised);
+  color: var(--ink);
+  font-size: var(--fs-2);
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    background-color var(--t-1) var(--ease-out),
+    border-color var(--t-1) var(--ease-out);
+}
+
+.btn:hover {
+  background: var(--bg-hover);
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.btn svg {
+  color: var(--ink-3);
+}
+
+.btn--primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.btn--primary:hover {
+  background: color-mix(in hsl, var(--primary) 86%, var(--bg));
+}
+
+.btn--quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-2);
+}
+
+.btn--quiet:hover {
+  background: var(--bg-hover);
+}
+
+.btn .kbd {
+  margin-left: 2px;
+}
+
+.kbd--on-primary {
+  border-color: color-mix(in hsl, var(--on-primary) 30%, transparent);
+  background: transparent;
+  color: color-mix(in hsl, var(--on-primary) 75%, transparent);
+}
+
+/* ---- toast ----------------------------------------------------------------------------- */
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: var(--s-3);
+  z-index: 5;
+  width: max-content;
+  max-width: calc(100% - 2 * var(--s-4));
+  padding: 7px var(--s-3);
+  border-radius: var(--r-2);
+  background: var(--ink);
+  color: var(--bg);
+  font-size: var(--fs-2);
+  line-height: 1.45;
+  text-align: center;
+  box-shadow: var(--shadow-pop);
+  transform: translateX(-50%);
+  animation: toast-in var(--t-2) var(--ease-out);
+}
+
+.toast--long {
+  text-align: left;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+}
+
+/* ---- small pieces ---------------------------------------------------------------------- */
+
+.app-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+
+.app-icon--blank {
+  background: var(--bg-active);
+}
+
+.checker {
+  background-color: var(--bg-raised);
+  background-image: conic-gradient(var(--checker) 25%, transparent 0 50%, var(--checker) 0 75%, transparent 0);
+  background-size: 12px 12px;
+}
+
+.btn--danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--on-danger);
+}
+
+.btn--danger:hover {
+  background: color-mix(in hsl, var(--danger) 88%, var(--ink));
+}
+
+.btn--danger-outline {
+  border-color: color-mix(in hsl, var(--danger) 45%, transparent);
+  background: transparent;
+  color: var(--danger);
+}
+
+.btn--danger-outline:hover {
+  background: var(--danger-soft);
+}
+
+.btn.is-pressed {
+  background: var(--bg-active);
+  color: var(--ink);
+}

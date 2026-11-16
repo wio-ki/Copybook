@@ -154,6 +154,8 @@ interface PasteOutcome {
 
 interface Stats {
   total: number; text: number; image: number; files: number; favorite: number;
+  pinned: number;
+  marked: number;      // favorite OR pinned (what clear_history keeps with keepMarked)
   dbBytes: number;     // database file(s) size incl. WAL
   imageBytes: number;  // sum of <data>\images
 }

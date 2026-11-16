@@ -34,6 +34,7 @@
   --primary: var(--ink);
   --on-primary: hsl(40 33% 97%);
   --danger: hsl(354 62% 42%);
+  --on-danger: hsl(0 0% 100%);
   --danger-soft: hsl(354 62% 42% / 0.08);
   --success: hsl(152 42% 30%);
 
@@ -102,6 +103,7 @@
 
     --on-primary: hsl(222 10% 12%);
     --danger: hsl(356 70% 64%);
+    --on-danger: hsl(222 14% 10%);
     --danger-soft: hsl(356 70% 64% / 0.12);
     --success: hsl(150 40% 60%);
 
@@ -134,6 +136,7 @@
 
   --on-primary: hsl(222 10% 12%);
   --danger: hsl(356 70% 64%);
+  --on-danger: hsl(222 14% 10%);
   --danger-soft: hsl(356 70% 64% / 0.12);
   --success: hsl(150 40% 60%);
 

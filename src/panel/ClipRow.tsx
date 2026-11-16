@@ -1,4 +1,4 @@
-import { File, Folder, Link2, MoreHorizontal, PenLine, Pin, Star } from 'lucide-react';
+import { File, Folder, MoreHorizontal, PenLine, Pin, Star } from 'lucide-react';
 import { memo, type MouseEvent } from 'react';
 import type { Lang } from '../shared/app';
 import { assetUrl } from '../shared/api';
@@ -70,7 +70,7 @@ export const ClipRow = memo(function ClipRow(props: RowProps) {
             <span>{item.note}</span>
           </p>
         )}
-        <Content item={item} compact={compact} t={t} lang={lang} />
+        <Content item={item} compact={compact} t={t} />
         {!compact && <Meta item={item} t={t} lang={lang} now={now} />}
       </div>
 
@@ -116,14 +116,21 @@ export const ClipRow = memo(function ClipRow(props: RowProps) {
   );
 });
 
-function Content({ item, compact, t, lang }: { item: ClipItem; compact: boolean; t: Strings; lang: Lang }) {
+function Content({ item, compact, t }: { item: ClipItem; compact: boolean; t: Strings }) {
   if (item.kind === 'image' && item.image) {
     const { width, height, thumb } = item.image;
     return (
       <div className="row-image">
-        <div className="thumb" style={{ aspectRatio: `${width} / ${height}` }}>
-          <img src={assetUrl(thumb)} alt="" loading="lazy" decoding="async" draggable={false} />
-        </div>
+        <img
+          className="thumb checker"
+          src={assetUrl(thumb)}
+          width={width}
+          height={height}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          draggable={false}
+        />
         {compact && (
           <span className="row-dim tnum">
             {width} × {height}
@@ -162,7 +169,6 @@ function Content({ item, compact, t, lang }: { item: ClipItem; compact: boolean;
       if (parts)
         return (
           <p className={`row-text row-url${compact ? ' is-single' : ''}`}>
-            <Link2 size={13} strokeWidth={2} aria-hidden="true" />
             <span className="url-host">{parts.host}</span>
             <span className="url-rest">{parts.rest}</span>
           </p>
@@ -196,7 +202,6 @@ function Content({ item, compact, t, lang }: { item: ClipItem; compact: boolean;
       {compact ? tidy.replace(/\s*\n\s*/g, ' ⏎ ') : tidy}
     </p>
   );
-  void lang;
 }
 
 function Meta({ item, t, lang, now }: { item: ClipItem; t: Strings; lang: Lang; now: number }) {

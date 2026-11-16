@@ -61,7 +61,7 @@ export function formatBytes(bytes: number, lang: Lang): string {
 
 const CJK = /[　-〿㐀-鿿豈-﫿＀-￯]/g;
 const CODE_START =
-  /^\s*(import|export|const|let|var|function|class|def|fn|pub|use|package|return|if|for|while|SELECT|INSERT|UPDATE|DELETE|CREATE|#include|#!|<\?php|<!DOCTYPE|<html|<div|\{|\[)\b?/im;
+  /^\s*(?:(?:import|export|const|let|var|function|class|def|fn|pub|use|package|return|if|for|while|SELECT|INSERT|UPDATE|DELETE|CREATE)\b|#include|#!|<\?php|<!DOCTYPE|<html|<div|[{[])/im;
 const SHELL = /^\s*(\$ |> |PS> |sudo |npm |npx |pnpm |yarn |git |cargo |cd |ls |ssh |scp |curl |wget |docker |kubectl |python |pip |winget |choco |code )/;
 
 /** Decide whether a text preview reads better in the monospace face. */

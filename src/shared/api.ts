@@ -130,13 +130,7 @@ export function assetUrl(path: string): string {
 }
 
 /** Proxy so call sites can write `api.listItems(...)` without awaiting the backend first. */
-type Async<T> = {
-  [K in keyof T]: T[K] extends (...args: infer A) => infer R
-    ? (...args: A) => R extends Promise<unknown> ? R : Promise<R>
-    : never;
-};
-
-export const api: Async<Omit<Backend, 'assetUrl'>> = new Proxy({} as Async<Omit<Backend, 'assetUrl'>>, {
+export const api: Omit<Backend, 'assetUrl'> = new Proxy({} as Omit<Backend, 'assetUrl'>, {
   get(_target, prop: string) {
     return async (...args: unknown[]) => {
       const b = await getBackend();

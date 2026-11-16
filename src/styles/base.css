@@ -64,6 +64,7 @@ img {
 
 .mono {
   font-family: var(--font-mono);
+  font-weight: 350; /* Cascadia is dark next to Segoe UI at the same size */
 }
 
 .tnum {

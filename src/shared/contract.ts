@@ -76,6 +76,8 @@ export interface Stats {
   image: number;
   files: number;
   favorite: number;
+  pinned: number;
+  marked: number;
   dbBytes: number;
   imageBytes: number;
 }
