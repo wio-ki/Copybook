@@ -1,4 +1,4 @@
 [[permission]]
 identifier = "allow-copybook"
 description = "Allow the Copybook application command contract"
-commands.allow = ["list_items", "get_item", "get_item_content", "paste_item", "copy_item", "set_favorite", "set_pinned", "set_note", "delete_items", "clear_history", "get_stats", "list_seen_apps", "get_settings", "update_settings", "get_capture_paused", "set_capture_paused", "hide_panel", "set_panel_locked", "open_settings", "open_url", "open_path", "reveal_path", "open_data_dir", "get_app_info"]
+commands.allow = ["list_items", "get_item", "get_item_content", "paste_item", "copy_item", "set_favorite", "set_pinned", "set_note", "delete_items", "clear_history", "get_stats", "list_seen_apps", "get_settings", "update_settings", "get_capture_paused", "set_capture_paused", "hide_panel", "set_panel_locked", "open_settings", "open_url", "open_path", "reveal_path", "open_data_dir", "get_app_info", "check_update", "restart_as_admin"]

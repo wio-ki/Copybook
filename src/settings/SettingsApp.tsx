@@ -8,6 +8,7 @@ import {
   Plus,
   Radio,
   RefreshCw,
+  Shield,
   SlidersHorizontal,
   X,
 } from 'lucide-react';
@@ -66,7 +67,7 @@ export function SettingsApp() {
   const page = useMemo(() => {
     switch (section) {
       case 'general':
-        return <General settings={settings} save={save} />;
+        return <General settings={settings} save={save} notify={show} />;
       case 'capture':
         return <Capture settings={settings} save={save} />;
       case 'paste':
@@ -139,9 +140,35 @@ function PageHead({ title, lead }: { title: string; lead: string }) {
 
 // ---- General --------------------------------------------------------------------------
 
-function General({ settings, save }: { settings: Settings; save: SaveFn }) {
+function General({ settings, save, notify }: { settings: Settings; save: SaveFn; notify: (text: string) => void }) {
   const { t } = useApp();
   const g = t.settings.general;
+  const [info, setInfo] = useState<AppInfo | null>(null);
+  const [restarting, setRestarting] = useState(false);
+
+  useEffect(() => {
+    void api.getAppInfo().then(setInfo).catch((e) => notify(t.errors[toCmdError(e).code]));
+  }, [notify, t]);
+
+  const restartAsAdmin = async () => {
+    if (restarting || !info || info.elevated) return;
+    setRestarting(true);
+    try {
+      const launched = await api.restartAsAdmin();
+      if (launched) {
+        setInfo({ ...info, elevated: true });
+        return;
+      }
+      const current = await api.getAppInfo();
+      setInfo(current);
+      if (!current.elevated) notify(g.adminCancelled);
+    } catch {
+      notify(g.adminFailed);
+    } finally {
+      setRestarting(false);
+    }
+  };
+
   return (
     <>
       <PageHead title={g.title} lead={g.lead} />
@@ -192,6 +219,17 @@ function General({ settings, save }: { settings: Settings; save: SaveFn }) {
         </Row>
         <Row label={g.autostart} hint={g.autostartHint} htmlFor="s-autostart">
           <Switch id="s-autostart" checked={settings.autostart} onChange={(autostart) => void save({ autostart })} />
+        </Row>
+        <Row label={g.admin} hint={info?.elevated ? g.adminHintActive : g.adminHint}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => void restartAsAdmin()}
+            disabled={!info || info.elevated || restarting}
+          >
+            <Shield size={14} strokeWidth={1.75} aria-hidden="true" />
+            {info?.elevated ? g.adminActive : restarting ? g.adminRestarting : g.adminRestart}
+          </button>
         </Row>
       </Group>
 

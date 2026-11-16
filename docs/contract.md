@@ -302,6 +302,7 @@ Panel keyboard (frontend): quick paste is `Ctrl+1..9` or `Ctrl+Shift+1..9`; some
 | `open_data_dir` | `{}` | `void` | |
 | `get_app_info` | `{}` | `AppInfo` | |
 | `check_update` | `{}` | `UpdateInfo` | asks the GitHub Releases API for the newest release; never downloads or installs anything itself; network failures are `network` |
+| `restart_as_admin` | `{}` | `boolean` | requests UAC and restarts elevated; `false` on cancellation or if already elevated; `io` on launch failure; current instance exits only after a successful launch |
 
 ### Search (`list_items`)
 
@@ -362,4 +363,12 @@ Panel keyboard (frontend): quick paste is `Ctrl+1..9` or `Ctrl+Shift+1..9`; some
   pre-release suffix such as `-beta.1` sorts below its release). Any transport, TLS, HTTP or
   JSON problem is `network`. Nothing is sent on a timer: only a click reaches GitHub.
 * **Autostart** via `tauri-plugin-autostart` (HKCU Run). Starting at login never shows a window.
+* **Run as administrator**: Preferences → General offers an explicit restart button and shows
+  the current elevation status using `get_app_info`. The button is disabled while the request
+  is pending or already elevated. `restart_as_admin` uses Windows `runas` for the current
+  executable; cancelling UAC leaves the current instance running. The elevated replacement
+  waits for the original process to exit before initializing the single-instance plugin,
+  database, hooks and shortcuts, then reopens General. The same data directory is carried
+  across the restart (including `COPYBOOK_DATA_DIR` overrides). This applies to this run only;
+  future ordinary launches and login startup retain their usual permissions.
 * **Single instance** via `tauri-plugin-single-instance`: a second launch shows the panel.

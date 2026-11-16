@@ -189,3 +189,15 @@ pub fn get_app_info(app: AppHandle) -> Result<AppInfo> {
         elevated: platform::self_elevated(),
     })
 }
+
+#[tauri::command]
+pub async fn restart_as_admin(app: AppHandle) -> Result<bool> {
+    let launched = blocking(app.clone(), |a| {
+        crate::elevation::launch(&a.state::<AppState>().dir)
+    })
+    .await?;
+    if launched {
+        app.exit(0);
+    }
+    Ok(launched)
+}

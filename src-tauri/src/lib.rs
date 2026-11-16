@@ -1,6 +1,7 @@
 mod clipboard;
 mod commands;
 mod detect;
+mod elevation;
 mod formats;
 mod hook;
 pub mod model;
@@ -50,7 +51,9 @@ fn initialize(app: &tauri::AppHandle) -> Result<()> {
         if let Err(e) = shell::start(&handle) {
             log::error!("Shell startup failed: {}", e.code);
         }
-        if first && !std::env::args().any(|a| a == "--autostart") {
+        if std::env::args().any(|a| a == "--elevated-restart") {
+            let _ = window::open_settings(&handle, Some("general".into()));
+        } else if first && !std::env::args().any(|a| a == "--autostart") {
             let _ = window::open_settings(&handle, None);
         }
         log::info!("Backend ready");
@@ -60,7 +63,17 @@ fn initialize(app: &tauri::AppHandle) -> Result<()> {
 }
 
 pub fn run() {
-    let override_dir = match std::env::var_os("COPYBOOK_DATA_DIR") {
+    let elevated_dir = match elevation::prepare() {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("Elevation restart failed: {}", e.message);
+            return;
+        }
+    };
+    let override_dir = match elevated_dir
+        .map(std::path::PathBuf::into_os_string)
+        .or_else(|| std::env::var_os("COPYBOOK_DATA_DIR"))
+    {
         Some(dir) => match std::path::absolute(std::path::PathBuf::from(dir)) {
             Ok(dir) => Some(dir),
             Err(_) => {
@@ -137,7 +150,8 @@ pub fn run() {
             commands::reveal_path,
             commands::open_data_dir,
             commands::get_app_info,
-            commands::check_update
+            commands::check_update,
+            commands::restart_as_admin
         ])
         .setup(move |app| {
             let dir = match &override_dir {

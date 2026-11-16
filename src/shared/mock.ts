@@ -201,6 +201,7 @@ export function createMockBackend(): Backend {
     ...(params.has('plain') ? { pastePlain: true } : {}),
   };
   let paused = params.has('paused');
+  let elevated = params.get('admin') === '1';
   const listeners = new Map<string, Set<(p: unknown) => void>>();
 
   const emit = <E extends keyof EventMap>(event: E, payload: EventMap[E]) => {
@@ -380,8 +381,14 @@ export function createMockBackend(): Backend {
       return delay({
         version: '0.1.0',
         dataDir: 'C:\\Users\\PC\\AppData\\Roaming\\io.github.wio-ki.copybook',
-        elevated: false,
+        elevated,
       });
+    },
+    async restartAsAdmin() {
+      if (params.get('admin') === 'error') throw { code: 'io', message: 'Could not restart' };
+      if (elevated || params.get('admin') === 'cancel') return delay(false);
+      elevated = true;
+      return delay(true);
     },
     // Dev-only: `?update=1` offers a newer release, `?update=none` the up-to-date answer.
     async checkUpdate() {

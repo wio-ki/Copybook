@@ -52,6 +52,8 @@ Copybook 常驻托盘，记下你复制的文字、富文本、图片和文件�
 
 > 目标程序以管理员身份运行时，Windows 不允许普通程序向它发送按键：这时 Copybook 会把内容
 > 放进剪贴板并提示你手动 <kbd>Ctrl</kbd>+<kbd>V</kbd>。
+> 也可在「偏好设置 → 通用」中点击「以管理员权限重新启动」，通过 Windows 授权后即可向管理员程序自动粘贴。
+> 取消授权会继续以普通权限运行；此选项仅本次运行生效。
 
 ## 从源码构建
 
@@ -96,6 +98,9 @@ images, files, links and starred items; stars, pins and notes; <kbd>Shift</kbd>+
 for plain text; <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>1</kbd>–<kbd>9</kbd> quick paste; respects password-manager
 "do not record" hints and skips keys and tokens; optional <kbd>Win</kbd>+<kbd>V</kbd> takeover;
 light and dark themes; Chinese and English UI. Everything stays on your computer.
+
+Preferences → General offers **Restart as administrator** to paste into elevated apps after
+Windows approval. Cancelling leaves Copybook running normally. This applies to the current run.
 
 Build from source with the commands above. The frontend/backend contract lives in
 `docs/contract.md`. Feature set inspired by [EcoPaste](https://github.com/EcoPasteHub/EcoPaste).
