@@ -207,7 +207,8 @@ function Content({ item, compact, t }: { item: ClipItem; compact: boolean; t: St
 function Meta({ item, t, lang, now }: { item: ClipItem; t: Strings; lang: Lang; now: number }) {
   let extra = '';
   if (item.kind === 'image' && item.image) {
-    extra = `${item.image.width} × ${item.image.height} · ${formatBytes(item.image.bytes, lang)}`;
+    // Pixels only: the row is narrow, the app name matters more than the file size here.
+    extra = `${item.image.width}×${item.image.height}`;
   } else if (item.kind === 'files' && item.files) {
     const one = item.files.length === 1 ? item.files[0] : null;
     extra = one

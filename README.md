@@ -7,6 +7,10 @@
 把复制过的东西，都誊在一本册子里。
 
 [English](#english) · MIT
+
+<img src="docs/screenshots/panel.png" width="330" alt="剪贴板面板" />
+<img src="docs/screenshots/settings.png" width="560" alt="偏好设置" />
+
 </div>
 
 ## 它做什么
@@ -32,7 +36,7 @@ Copybook 常驻托盘，记下你复制的文字、富文本、图片和文件�
 | <kbd>↑</kbd> <kbd>↓</kbd> / <kbd>PgUp</kbd> <kbd>PgDn</kbd> | 选择 |
 | <kbd>Enter</kbd> | 粘贴选中的记录 |
 | <kbd>Shift</kbd>+<kbd>Enter</kbd> | 换一种格式粘贴 |
-| <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd> | 粘贴第 1–9 条 |
+| <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd> 或 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>1</kbd>–<kbd>9</kbd> | 粘贴第 1–9 条（部分程序的 <kbd>Ctrl</kbd>+数字被系统占用，可改用加 <kbd>Shift</kbd> 的组合） |
 | <kbd>Alt</kbd>+<kbd>Enter</kbd> | 查看详情 |
 | <kbd>Ctrl</kbd>+<kbd>C</kbd> | 只复制，不粘贴 |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Ctrl</kbd>+<kbd>P</kbd> | 收藏 / 置顶 |
@@ -89,7 +93,7 @@ characters, press <kbd>Enter</kbd>, and the item is pasted back into the app you
 
 Highlights: full-text search that also works for one or two Chinese characters; filters for text,
 images, files, links and starred items; stars, pins and notes; <kbd>Shift</kbd>+<kbd>Enter</kbd>
-for plain text; <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd> quick paste; respects password-manager
+for plain text; <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>1</kbd>–<kbd>9</kbd> quick paste; respects password-manager
 "do not record" hints and skips keys and tokens; optional <kbd>Win</kbd>+<kbd>V</kbd> takeover;
 light and dark themes; Chinese and English UI. Everything stays on your computer.
 

@@ -270,6 +270,9 @@ Arguments are passed as one object with these camelCase keys. Every command retu
 | `get_item` | `{ id }` | `ClipItem` | `not_found` if missing |
 | `get_item_content` | `{ id, maxChars }` | `ItemContent` | `maxChars` 1..5 000 000 |
 | `paste_item` | `{ id, plain }` | `PasteOutcome` | see Paste |
+
+Panel keyboard (frontend): quick paste is `Ctrl+1..9` or `Ctrl+Shift+1..9`; some apps hold
+`Ctrl+1..3` as global hotkeys, which swallow them system-wide.
 | `copy_item` | `{ id, plain }` | `void` | writes the clipboard only; bumps if `moveToTop`; panel stays |
 | `set_favorite` | `{ id, value }` | `ClipItem` | |
 | `set_pinned` | `{ id, value }` | `ClipItem` | |
@@ -311,9 +314,10 @@ Arguments are passed as one object with these camelCase keys. Every command retu
 3. If there is no valid paste target: hide, return `no_target`.
 4. If the target process is elevated and Copybook is not: keep the panel open and return
    `elevated_target` (the clipboard already holds the item; the UI tells the user).
-5. Hide the panel, activate the target, wait until it is the foreground window (<= 300 ms),
-   wait until Shift / Alt / Win are released (<= 1 s), send Ctrl+V with `SendInput`,
-   return `{ pasted: true, reason: null }`.
+5. Activate the target while the panel still has the foreground, hide the panel, wait until
+   the target is the foreground window (<= 300 ms), wait until Shift / Alt / Win are released
+   (<= 1 s), give the target time to restore its focused control (80 ms), send Ctrl+V with
+   `SendInput`, return `{ pasted: true, reason: null }`. Ctrl may stay held (quick paste).
 
 ## 6. Events (`emit` to all windows)
 

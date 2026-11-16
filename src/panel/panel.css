@@ -208,11 +208,15 @@
   justify-self: center;
 }
 
+.row > * {
+  min-width: 0;
+}
+
 .row-body {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  min-width: 0;
+  overflow: hidden;
 }
 
 .row-text {
@@ -305,14 +309,15 @@
   align-items: center;
   gap: var(--s-2);
   min-width: 0;
+  overflow: hidden;
 }
 
 .thumb {
   display: block;
   width: auto;
   height: auto;
-  max-width: 100%;
-  max-height: 104px;
+  max-width: min(100%, 160px);
+  max-height: 88px;
   border-radius: var(--r-1);
   box-shadow: 0 0 0 1px var(--rule);
   object-fit: contain;
@@ -386,6 +391,10 @@ li.file-more {
   color: var(--ink-3);
 }
 
+.row-meta > * {
+  white-space: nowrap;
+}
+
 .meta-source {
   display: flex;
   align-items: center;
@@ -401,6 +410,10 @@ li.file-more {
   text-overflow: ellipsis;
 }
 
+.row-meta time {
+  flex: none;
+}
+
 .meta-sep {
   color: var(--ink-4);
 }
@@ -409,9 +422,12 @@ li.file-more {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   margin-left: auto;
   padding-left: var(--s-2);
+  white-space: nowrap;
 }
 
 .chip {
