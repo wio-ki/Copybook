@@ -38,7 +38,7 @@ export interface Backend {
   webdavTest(connection: WebDavConnection): Promise<void>;
   webdavList(connection: WebDavConnection): Promise<BackupEntry[]>;
   webdavBackup(connection: WebDavConnection, password: string): Promise<BackupEntry>;
-  webdavRestore(connection: WebDavConnection, name: string, password: string, restoreSettings: boolean): Promise<RestoreResult>;
+  webdavRestore(connection: WebDavConnection, name: string, password: string, restoreSettings: boolean, legacy?: boolean): Promise<RestoreResult>;
   clearHistory(keepMarked: boolean): Promise<number>;
   getStats(): Promise<Stats>;
   listSeenApps(): Promise<SeenApp[]>;
@@ -121,7 +121,7 @@ async function createTauriBackend(): Promise<Backend> {
     webdavTest: (connection) => call('webdav_test', { connection }),
     webdavList: (connection) => call('webdav_list', { connection }),
     webdavBackup: (connection, password) => call('webdav_backup', { connection, password }),
-    webdavRestore: (connection, name, password, restoreSettings) => call('webdav_restore', { connection, name, password, restoreSettings }),
+    webdavRestore: (connection, name, password, restoreSettings, legacy = false) => call('webdav_restore', { connection, name, password, restoreSettings, legacy }),
     clearHistory: (keepMarked) => call('clear_history', { keepMarked }),
     getStats: () => call('get_stats'),
     listSeenApps: () => call('list_seen_apps'),

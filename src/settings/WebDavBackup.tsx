@@ -18,6 +18,8 @@ function remembered(): Pick<WebDavConnection, 'url' | 'username'> {
     return { url: '', username: '' };
   }
 }
+const entryKey = (entry: BackupEntry) => `${entry.legacy ? 'legacy:' : ''}${entry.name}`;
+
 export function WebDavBackup() {
   const { lang, t } = useApp();
   const zh = lang === 'zh-CN';
@@ -26,6 +28,7 @@ export function WebDavBackup() {
   const [confirmation, setConfirmation] = useState('');
   const [entries, setEntries] = useState<BackupEntry[] | null>(null);
   const [selected, setSelected] = useState('');
+  const selectedEntry = entries?.find((entry) => entryKey(entry) === selected);
   const [busy, setBusy] = useState('');
   const [status, setStatus] = useState('');
   const [restoring, setRestoring] = useState(false);
@@ -48,7 +51,10 @@ export function WebDavBackup() {
       try {
         const url = new URL(connection.url.trim());
         if (!url.username && !url.password && !url.search && !url.hash) {
-          localStorage.setItem('copybook.webdav', JSON.stringify({ url: url.toString(), username: connection.username }));
+          localStorage.setItem(
+            'copybook.webdav',
+            JSON.stringify({ url: url.toString(), username: connection.username }),
+          );
         }
       } catch {
         /* Storage may be unavailable. */
@@ -66,7 +72,7 @@ export function WebDavBackup() {
     run(zh ? '正在读取备份…' : 'Reading backups…', async () => {
       const list = await api.webdavList(connection);
       setEntries(list);
-      setSelected(list[0]?.name ?? '');
+      setSelected(list[0] ? entryKey(list[0]) : '');
       return zh ? `找到 ${list.length} 份加密备份` : `Found ${list.length} encrypted backups`;
     });
   return (
@@ -89,10 +95,10 @@ export function WebDavBackup() {
         )}
         <fieldset disabled={!!busy} className="backup-fields">
           <label className="backup-wide">
-            {zh ? 'WebDAV 目录地址（已存在的文件夹）' : 'WebDAV collection URL (existing folder)'}
+            {zh ? 'WebDAV 基础目录地址' : 'WebDAV base collection URL'}
             <input
               type="url"
-              placeholder="https://dav.example.com/Copybook/"
+              placeholder="https://dav.example.com/"
               value={connection.url}
               onChange={(e) => change('url', e.target.value)}
               autoComplete="off"
@@ -120,8 +126,8 @@ export function WebDavBackup() {
         </fieldset>
         <p className="backup-hint">
           {zh
-            ? '仅在本机记住地址和用户名；登录密码和备份密码不会保存。远程连接使用 HTTPS，本机测试支持 HTTP。'
-            : 'Only the URL and username are remembered locally. Login and backup passwords are never saved. HTTPS is required for remote servers; HTTP is supported on loopback.'}
+            ? '备份自动存放在 copybook/ 子目录。仅在本机记住地址和用户名，密码不会保存。远程连接使用 HTTPS，本机测试支持 HTTP。'
+            : 'Backups use the copybook/ subfolder automatically. Only URL and username are remembered; passwords are never saved. HTTPS is required remotely; loopback HTTP is supported.'}
         </p>
         <div className="backup-actions">
           <button
@@ -173,7 +179,7 @@ export function WebDavBackup() {
             void run(zh ? '正在加密并上传…' : 'Encrypting and uploading…', async () => {
               const entry = await api.webdavBackup(connection, password);
               setEntries((current) => [entry, ...(current ?? [])]);
-              setSelected(entry.name);
+              setSelected(entryKey(entry));
               return zh ? '加密备份已上传' : 'Encrypted backup uploaded';
             })
           }
@@ -188,8 +194,9 @@ export function WebDavBackup() {
               <select value={selected} onChange={(e) => setSelected(e.target.value)} disabled={!!busy}>
                 {!entries.length && <option value="">{zh ? '暂无备份' : 'No backups'}</option>}
                 {entries.map((entry) => (
-                  <option key={entry.name} value={entry.name}>
+                  <option key={entryKey(entry)} value={entryKey(entry)}>
                     {entry.name}
+                    {entry.legacy ? (zh ? ' · 旧根目录' : ' · legacy root') : ''}
                     {entry.bytes != null ? ` · ${formatBytes(entry.bytes, lang)}` : ''}
                   </option>
                 ))}
@@ -248,7 +255,13 @@ export function WebDavBackup() {
                   void run(
                     zh ? '正在下载、解密并恢复…' : 'Downloading, decrypting and restoring…',
                     async () => {
-                      const result = await api.webdavRestore(connection, selected, password, restoreSettings);
+                      const result = await api.webdavRestore(
+                        connection,
+                        selectedEntry?.name ?? selected,
+                        password,
+                        restoreSettings,
+                        selectedEntry?.legacy ?? false,
+                      );
                       const summary = zh
                         ? `已导入 ${result.imported} 条，跳过 ${result.skipped} 条重复记录`
                         : `Imported ${result.imported}; skipped ${result.skipped} duplicates`;

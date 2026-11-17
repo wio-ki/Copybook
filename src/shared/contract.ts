@@ -202,6 +202,6 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 export interface WebDavConnection { url: string; username: string; password: string }
-export interface BackupEntry { name: string; bytes: number | null }
+export interface BackupEntry { name: string; bytes: number | null; legacy: boolean }
 export interface RestoreResult { imported: number; skipped: number; settingsRestored: boolean | null }
 export type HistoryOptions = Pick<ListQuery, 'sourceExe' | 'since' | 'until' | 'group'>;

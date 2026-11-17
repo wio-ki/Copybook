@@ -37,7 +37,7 @@ pub struct WindowState {
 }
 #[derive(Default)]
 pub struct PanelState {
-    pub target: Option<isize>,
+    pub target: Option<platform::PasteTarget>,
     pub locked: bool,
     pub shown: Option<Instant>,
     pub saved: WindowState,
@@ -181,10 +181,14 @@ pub fn show(app: &AppHandle) -> Result<()> {
     let settings = state.settings()?;
     let panel = panel(app)?;
     let current = platform::foreground();
+    let panel_hwnd = panel.hwnd().map_err(|_| CmdError::internal())?;
     {
         let mut p = state.panel.lock().map_err(|_| CmdError::internal())?;
-        // Our own window in front (e.g. settings) means there is nothing to paste into.
-        p.target = platform::target(current);
+        // Settings is a valid recipient too. Preserve the snapshot if showing an already
+        // focused panel; replacing it would lose the original input control.
+        if current != platform::hwnd(panel_hwnd.0 as isize) {
+            p.target = platform::target(current, platform::hwnd(panel_hwnd.0 as isize));
+        }
     }
     position(app, &panel, &settings.panel_position)?;
     let locked = {
@@ -216,8 +220,8 @@ pub fn hide(app: &AppHandle, restore: bool) -> Result<()> {
     app.emit("panel://hidden", serde_json::json!({}))
         .map_err(|_| CmdError::internal())?;
     if restore {
-        if let Some(target) = target.and_then(|t| platform::target(platform::hwnd(t))) {
-            platform::force_foreground(platform::hwnd(target));
+        if let Some(target) = target {
+            target.activate();
         }
     }
     Ok(())

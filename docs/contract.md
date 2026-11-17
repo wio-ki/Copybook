@@ -1,4 +1,23 @@
-# Copybook — frontend/backend contract (v1.4)
+# Copybook — frontend/backend contract (v1.4.1)
+
+## v1.4.1 fixes (take precedence below)
+
+* WebDAV uses a `copybook/` child of the configured collection. If the configured URL
+  already ends with `copybook/` (case-insensitive), use it directly. MKCOL creates the
+  child automatically; new backups are written only there. Backup entries additionally
+  have `legacy: boolean`; listing includes v1.4.0 backups from the configured parent
+  without moving/deleting them. `webdav_restore` accepts optional `legacy` (default false)
+  to read that parent; every filename is still validated, and requests stay in these two
+  collections. The UI identifies legacy backups separately.
+* A paste target is the actual foreground top-level window (`GA_ROOT`), including an owned
+  dialog or Copybook settings, with its process/thread identity and focused child captured
+  before showing the panel. Only the history panel itself and system shell surfaces are
+  excluded. Reopening while the panel is already foreground preserves the saved target.
+* Before injecting Ctrl+V once, restore the target and its still-valid focused child, hide
+  the panel, wait for held Ctrl/Shift/Alt/Win and mouse buttons to release (<= 1 s), then
+  require stable target/input focus. Never paste into a window whose identity changed or
+  into a different foreground window. Windowed/Chromium inputs retain their text selection.
+
 
 ## v1.4 additions (take precedence over the v1 descriptions below)
 
@@ -72,7 +91,7 @@ Windows 10/11 only. No macOS or Linux code paths.
 | --- | --- |
 | productName | `Copybook` |
 | identifier | `io.github.wio-ki.copybook` |
-| version | `1.4.0` (single source: `package.json`, `tauri.conf.json` reads it) |
+| version | `1.4.1` (single source: `package.json`, `tauri.conf.json` reads it) |
 | data dir | Tauri `app_data_dir()` = `%APPDATA%\io.github.wio-ki.copybook\` |
 | database | `<data>\copybook.db` (SQLite, WAL) |
 | settings | `<data>\settings.json` |

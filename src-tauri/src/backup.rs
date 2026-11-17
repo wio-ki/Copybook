@@ -44,6 +44,7 @@ impl Drop for Connection {
 pub struct BackupEntry {
     pub name: String,
     pub bytes: Option<u64>,
+    pub legacy: bool,
 }
 #[derive(Debug, Serialize)]
 pub struct RestoreResult {
@@ -347,7 +348,7 @@ fn checked(response: Response) -> Result<Response> {
         _ => Err(network()),
     }
 }
-fn endpoint(connection: &Connection) -> Result<Url> {
+fn base_endpoint(connection: &Connection) -> Result<Url> {
     let mut url =
         Url::parse(connection.url.trim()).map_err(|_| CmdError::invalid("Invalid WebDAV URL"))?;
     let loopback = url
@@ -370,6 +371,19 @@ fn endpoint(connection: &Connection) -> Result<Url> {
     }
     Ok(url)
 }
+fn endpoint(connection: &Connection) -> Result<Url> {
+    let base = base_endpoint(connection)?;
+    if base
+        .path()
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .is_some_and(|name| name.eq_ignore_ascii_case("copybook"))
+    {
+        return Ok(base);
+    }
+    base.join("copybook/").map_err(|_| invalid())
+}
 fn client() -> Result<Client> {
     Client::builder()
         .redirect(Policy::none())
@@ -391,8 +405,13 @@ fn request(
     connection: &Connection,
     method: Method,
     name: Option<&str>,
+    legacy: bool,
 ) -> Result<reqwest::blocking::RequestBuilder> {
-    let mut url = endpoint(connection)?;
+    let mut url = if legacy {
+        base_endpoint(connection)?
+    } else {
+        endpoint(connection)?
+    };
     if let Some(name) = name {
         if !valid_name(name) {
             return Err(CmdError::invalid("Invalid backup filename"));
@@ -403,15 +422,59 @@ fn request(
         .request(method, url)
         .basic_auth(&connection.username, Some(&connection.password)))
 }
+fn ensure_collection(connection: &Connection) -> Result<()> {
+    let response = request(
+        connection,
+        Method::from_bytes(b"MKCOL").map_err(|_| CmdError::internal())?,
+        None,
+        false,
+    )?
+    .send()
+    .map_err(|_| network())?;
+    if matches!(
+        response.status(),
+        StatusCode::CREATED | StatusCode::METHOD_NOT_ALLOWED
+    ) {
+        return Ok(());
+    }
+    checked(response)?;
+    Err(network())
+}
+pub fn test_connection(connection: &Connection) -> Result<()> {
+    ensure_collection(connection)?;
+    list_at(connection, false).map(|_| ())
+}
 pub fn list(connection: &Connection) -> Result<Vec<BackupEntry>> {
-    let response=checked(request(connection,Method::from_bytes(b"PROPFIND").map_err(|_|CmdError::internal())?,None)?
+    ensure_collection(connection)?;
+    let mut entries = list_at(connection, false)?;
+    if endpoint(connection)? != base_endpoint(connection)? {
+        // v1.4.0 wrote to the parent. Keep those backups readable without moving or
+        // deleting cloud data; a parent that disallows listing must not block new backups.
+        if let Ok(legacy) = list_at(connection, true) {
+            entries.extend(legacy);
+        }
+    }
+    entries.sort_by(|a, b| b.name.cmp(&a.name).then(a.legacy.cmp(&b.legacy)));
+    entries.truncate(10000);
+    Ok(entries)
+}
+fn list_at(connection: &Connection, legacy: bool) -> Result<Vec<BackupEntry>> {
+    let response=checked(request(connection,Method::from_bytes(b"PROPFIND").map_err(|_|CmdError::internal())?,None,legacy)?
         .header("Depth","1").header("Content-Type","application/xml; charset=utf-8")
         .body("<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:getcontentlength/></d:prop></d:propfind>")
         .send().map_err(|_|network())?)?;
     let bytes = read_limited(response, 4 * 1024 * 1024)?;
-    parse_listing(&bytes, &endpoint(connection)?)
+    parse_listing(
+        &bytes,
+        &if legacy {
+            base_endpoint(connection)?
+        } else {
+            endpoint(connection)?
+        },
+        legacy,
+    )
 }
-fn parse_listing(bytes: &[u8], base: &Url) -> Result<Vec<BackupEntry>> {
+fn parse_listing(bytes: &[u8], base: &Url, legacy: bool) -> Result<Vec<BackupEntry>> {
     let mut reader = Reader::from_reader(bytes);
     reader.config_mut().trim_text(true);
     let mut entries = Vec::new();
@@ -450,6 +513,7 @@ fn parse_listing(bytes: &[u8], base: &Url) -> Result<Vec<BackupEntry>> {
                                 entries.push(BackupEntry {
                                     name: name.to_owned(),
                                     bytes: length,
+                                    legacy,
                                 });
                             }
                         }
@@ -477,8 +541,9 @@ pub fn upload(connection: &Connection, archive: &Archive, password: &str) -> Res
         .try_fill_bytes(&mut random)
         .map_err(|_| CmdError::internal())?;
     let name = format!("copybook-{}-{}.cpbk", now_ms(), u64::from_le_bytes(random));
+    ensure_collection(connection)?;
     checked(
-        request(connection, Method::PUT, Some(&name))?
+        request(connection, Method::PUT, Some(&name), false)?
             .header("Content-Type", "application/octet-stream")
             .header("If-None-Match", "*")
             .body(bytes)
@@ -488,11 +553,17 @@ pub fn upload(connection: &Connection, archive: &Archive, password: &str) -> Res
     Ok(BackupEntry {
         name,
         bytes: Some(size),
+        legacy: false,
     })
 }
-pub fn download(connection: &Connection, name: &str, password: &str) -> Result<Archive> {
+pub fn download(
+    connection: &Connection,
+    name: &str,
+    password: &str,
+    legacy: bool,
+) -> Result<Archive> {
     let response = checked(
-        request(connection, Method::GET, Some(name))?
+        request(connection, Method::GET, Some(name), legacy)?
             .send()
             .map_err(|_| network())?,
     )?;
@@ -557,9 +628,37 @@ mod tests {
         assert!(!valid_name("../copybook-1.cpbk"));
         assert!(!valid_name("copybook-%2f.cpbk"));
         let xml=br#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>/dav/copybook-1.cpbk</d:href><d:propstat><d:prop><d:getcontentlength>120</d:getcontentlength></d:prop></d:propstat></d:response><d:response><d:href>https://evil.test/dav/copybook-2.cpbk</d:href></d:response></d:multistatus>"#;
-        let entries = parse_listing(xml, &Url::parse("https://cloud.test/dav/").unwrap()).unwrap();
+        let entries =
+            parse_listing(xml, &Url::parse("https://cloud.test/dav/").unwrap(), false).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].bytes, Some(120));
+    }
+
+    #[test]
+    fn backups_default_to_one_copybook_subdirectory() {
+        for (url, expected) in [
+            ("https://cloud.test/", "https://cloud.test/copybook/"),
+            ("https://cloud.test/dav", "https://cloud.test/dav/copybook/"),
+            (
+                "https://cloud.test/dav/copybook/",
+                "https://cloud.test/dav/copybook/",
+            ),
+            (
+                "https://cloud.test/dav/Copybook",
+                "https://cloud.test/dav/Copybook/",
+            ),
+            (
+                "https://cloud.test/a%20b/",
+                "https://cloud.test/a%20b/copybook/",
+            ),
+        ] {
+            let connection = Connection {
+                url: url.into(),
+                username: String::new(),
+                password: String::new(),
+            };
+            assert_eq!(endpoint(&connection).unwrap().as_str(), expected);
+        }
     }
 
     #[test]
@@ -570,7 +669,8 @@ mod tests {
         let stored = Arc::new(Mutex::new((String::new(), Vec::<u8>::new())));
         let cloud = stored.clone();
         let server = std::thread::spawn(move || {
-            for _ in 0..5 {
+            let mut created = false;
+            for _ in 0..11 {
                 let (mut stream, _) = listener.accept().unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(30)))
@@ -604,12 +704,21 @@ mod tests {
                 let response = if !auth {
                     status = "401 Unauthorized";
                     Vec::new()
+                } else if first.starts_with("MKCOL ") {
+                    assert!(first.starts_with("MKCOL /dav/copybook/ "));
+                    status = if created {
+                        "405 Method Not Allowed"
+                    } else {
+                        "201 Created"
+                    };
+                    created = true;
+                    Vec::new()
                 } else if first.starts_with("PUT ") {
                     let name = first
                         .split_whitespace()
                         .nth(1)
                         .unwrap()
-                        .strip_prefix("/dav/")
+                        .strip_prefix("/dav/copybook/")
                         .unwrap()
                         .to_owned();
                     assert!(body.starts_with(MAGIC));
@@ -620,7 +729,13 @@ mod tests {
                 } else if first.starts_with("PROPFIND ") {
                     let stored = cloud.lock().unwrap();
                     status = "207 Multi-Status";
-                    format!("<d:multistatus xmlns:d=\"DAV:\"><d:response><d:href>/dav/{}</d:href><d:propstat><d:prop><d:getcontentlength>{}</d:getcontentlength></d:prop></d:propstat></d:response></d:multistatus>",stored.0,stored.1.len()).into_bytes()
+                    let (folder, name) = if first.starts_with("PROPFIND /dav/ ") {
+                        ("/dav/", "copybook-legacy.cpbk")
+                    } else {
+                        assert!(first.starts_with("PROPFIND /dav/copybook/ "));
+                        ("/dav/copybook/", stored.0.as_str())
+                    };
+                    format!("<d:multistatus xmlns:d=\"DAV:\"><d:response><d:href>{folder}{name}</d:href><d:propstat><d:prop><d:getcontentlength>{}</d:getcontentlength></d:prop></d:propstat></d:response></d:multistatus>",stored.1.len()).into_bytes()
                 } else {
                     cloud.lock().unwrap().1.clone()
                 };
@@ -643,18 +758,29 @@ mod tests {
             settings: Settings::default(),
             records: vec![],
         };
+        test_connection(&connection).unwrap();
         let entry = upload(&connection, &archive, "backup password").unwrap();
         let entries = list(&connection).unwrap();
-        assert_eq!(entries[0].name, entry.name);
+        assert_eq!(entries.iter().find(|e| !e.legacy).unwrap().name, entry.name);
         assert_eq!(
-            download(&connection, &entry.name, "wrong password")
+            entries.iter().find(|e| e.legacy).unwrap().name,
+            "copybook-legacy.cpbk"
+        );
+        assert_eq!(
+            download(&connection, "copybook-legacy.cpbk", "backup password", true)
+                .unwrap()
+                .schema,
+            1
+        );
+        assert_eq!(
+            download(&connection, &entry.name, "wrong password", false)
                 .err()
                 .unwrap()
                 .code,
             "crypto"
         );
         assert_eq!(
-            download(&connection, &entry.name, "backup password")
+            download(&connection, &entry.name, "backup password", false)
                 .unwrap()
                 .schema,
             1

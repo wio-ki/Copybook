@@ -150,7 +150,7 @@ pub async fn rename_group(
 }
 #[tauri::command]
 pub async fn webdav_test(app: AppHandle, connection: crate::backup::Connection) -> Result<()> {
-    blocking(app, move |_| crate::backup::list(&connection).map(|_| ())).await
+    blocking(app, move |_| crate::backup::test_connection(&connection)).await
 }
 #[tauri::command]
 pub async fn webdav_list(
@@ -184,13 +184,15 @@ pub async fn webdav_restore(
     name: String,
     password: String,
     restore_settings: bool,
+    legacy: Option<bool>,
 ) -> Result<crate::backup::RestoreResult> {
     let password = zeroize::Zeroizing::new(password);
     blocking(app, move |a| {
         let _gate = crate::backup::GATE
             .try_lock()
             .map_err(|_| CmdError::invalid("A backup or restore is already running"))?;
-        let archive = crate::backup::download(&connection, &name, &password)?;
+        let archive =
+            crate::backup::download(&connection, &name, &password, legacy.unwrap_or(false))?;
         let records = crate::backup::prepare(archive.records)?;
         let mut patch = serde_json::to_value(archive.settings).map_err(|_| CmdError::internal())?;
         let map = patch.as_object_mut().ok_or_else(CmdError::internal)?;

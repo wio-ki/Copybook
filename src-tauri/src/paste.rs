@@ -95,12 +95,12 @@ pub fn paste(app: &AppHandle, id: i64, plain: bool) -> Result<PasteOutcome> {
         .lock()
         .map_err(|_| CmdError::internal())?
         .target
-        .and_then(|t| platform::target(platform::hwnd(t)));
+        .filter(|t| t.valid());
     copy_for_target(
         app,
         id,
         plain,
-        settings.auto_paste && target.is_some_and(|t| platform::terminal(platform::hwnd(t))),
+        settings.auto_paste && target.is_some_and(|t| platform::terminal(platform::hwnd(t.window))),
     )?;
     if !settings.auto_paste {
         window::hide(app, true)?;
@@ -116,15 +116,16 @@ pub fn paste(app: &AppHandle, id: i64, plain: bool) -> Result<PasteOutcome> {
             reason: Some("no_target"),
         });
     };
-    let target = platform::hwnd(target);
-    if !platform::self_elevated() && platform::elevated(platform::pid(target)) {
+    if !platform::self_elevated()
+        && platform::elevated(platform::pid(platform::hwnd(target.window)))
+    {
         return Ok(PasteOutcome {
             pasted: false,
             reason: Some("elevated_target"),
         });
     }
     // Hand the foreground over while the panel still owns it; once hidden, Windows may refuse.
-    platform::force_foreground(target);
+    target.activate();
     window::hide(app, false)?;
     platform::paste_to(target)?;
     Ok(PasteOutcome {

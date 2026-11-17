@@ -52,14 +52,99 @@ pub fn pid(window: HWND) -> u32 {
     }
     pid
 }
-pub fn target(window: HWND) -> Option<isize> {
+/// The recipient before the history panel takes focus. HWNDs alone can be recycled by
+/// Windows, so keep the owning process/thread as well as the original input control.
+#[derive(Clone, Copy, Debug)]
+pub struct PasteTarget {
+    pub window: isize,
+    focus: Option<isize>,
+    process: u32,
+    thread: u32,
+}
+impl PasteTarget {
+    pub fn valid(self) -> bool {
+        let window = hwnd(self.window);
+        // SAFETY: these queries accept stale handles and never dereference caller memory.
+        unsafe {
+            IsWindow(Some(window)).as_bool()
+                && pid(window) == self.process
+                && GetWindowThreadProcessId(window, None) == self.thread
+        }
+    }
+    fn saved_focus(self) -> Option<HWND> {
+        self.focus
+            .map(hwnd)
+            .filter(|focus| belongs_to(hwnd(self.window), *focus))
+    }
+    pub fn activate(self) -> bool {
+        if !self.valid() || !force_foreground(hwnd(self.window)) {
+            return false;
+        }
+        self.restore_focus();
+        foreground() == hwnd(self.window)
+    }
+    fn restore_focus(self) {
+        let Some(focus) = self.saved_focus() else {
+            return;
+        };
+        // SAFETY: the saved child is validated against its live parent. Ensure this worker
+        // has a message queue before attaching, and always detach before returning.
+        unsafe {
+            let current = GetCurrentThreadId();
+            let other = GetWindowThreadProcessId(focus, None);
+            let mut message = MSG::default();
+            let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
+            let attached =
+                other != 0 && current != other && AttachThreadInput(current, other, true).as_bool();
+            if current == other || attached {
+                let _ = SetFocus(Some(focus));
+            }
+            if attached {
+                let _ = AttachThreadInput(current, other, false);
+            }
+        }
+    }
+    fn focus_ready(self) -> bool {
+        if !self.valid() || foreground() != hwnd(self.window) {
+            return false;
+        }
+        let Some(expected) = self.saved_focus() else {
+            return true;
+        };
+        gui_focus(self.thread).is_some_and(|focus| focus == expected || belongs_to(expected, focus))
+    }
+}
+fn belongs_to(window: HWND, child: HWND) -> bool {
+    // SAFETY: IsWindow/IsChild accept null and stale HWNDs.
+    unsafe {
+        IsWindow(Some(child)).as_bool() && (child == window || IsChild(window, child).as_bool())
+    }
+}
+fn gui_focus(thread: u32) -> Option<HWND> {
+    let mut info = GUITHREADINFO {
+        cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: info is initialized and sized for the documented Win32 structure.
+    unsafe {
+        GetGUIThreadInfo(thread, &mut info).ok()?;
+    }
+    (!info.hwndFocus.0.is_null()).then_some(info.hwndFocus)
+}
+pub fn target(window: HWND, excluded: HWND) -> Option<PasteTarget> {
     // SAFETY: all queried handles are checked with IsWindow; APIs accept null/stale handles.
     unsafe {
         if !IsWindow(Some(window)).as_bool() {
             return None;
         }
-        let root = GetAncestor(window, GA_ROOTOWNER);
-        if root.0.is_null() || pid(root) == GetCurrentProcessId() {
+        // Owned dialogs are independent paste recipients. GA_ROOTOWNER would instead
+        // activate their (often disabled) owner and lose the dialog's input control.
+        let root = GetAncestor(window, GA_ROOT);
+        if root.0.is_null()
+            || root == excluded
+            || !IsWindowVisible(root).as_bool()
+            || !IsWindowEnabled(root).as_bool()
+        {
             return None;
         }
         let mut class = [0u16; 256];
@@ -95,7 +180,15 @@ pub fn target(window: HWND) -> Option<isize> {
                 return None;
             }
         }
-        Some(root.0 as isize)
+        let thread = GetWindowThreadProcessId(root, None);
+        Some(PasteTarget {
+            window: root.0 as isize,
+            focus: gui_focus(thread)
+                .filter(|focus| belongs_to(root, *focus))
+                .map(|focus| focus.0 as isize),
+            process: pid(root),
+            thread,
+        })
     }
 }
 pub fn foreground() -> HWND {
@@ -181,6 +274,8 @@ pub fn force_foreground(window: HWND) -> bool {
         }
         let current = GetCurrentThreadId();
         let other = GetWindowThreadProcessId(GetForegroundWindow(), None);
+        let mut message = MSG::default();
+        let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
         let attached =
             other != 0 && other != current && AttachThreadInput(current, other, true).as_bool();
         let _ = BringWindowToTop(window);
@@ -215,13 +310,9 @@ pub fn key(code: VIRTUAL_KEY, up: bool) -> INPUT {
         },
     }
 }
-pub fn paste_to(window: HWND) -> Result<()> {
-    force_foreground(window);
-    let start = Instant::now();
-    while foreground() != window && start.elapsed() < Duration::from_millis(300) {
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    if foreground() != window {
+pub fn paste_to(target: PasteTarget) -> Result<()> {
+    let window = hwnd(target.window);
+    if !target.activate() {
         return Err(CmdError::new(
             "internal",
             "Paste target did not receive focus",
@@ -231,9 +322,11 @@ pub fn paste_to(window: HWND) -> Result<()> {
     loop {
         // SAFETY: virtual key constants are valid; reading key state has no side effects.
         let down = unsafe {
-            [VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN]
-                .iter()
-                .any(|k| GetAsyncKeyState(i32::from(k.0)) < 0)
+            [
+                VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN, VK_LBUTTON, VK_RBUTTON, VK_MBUTTON,
+            ]
+            .iter()
+            .any(|k| GetAsyncKeyState(i32::from(k.0)) < 0)
         };
         if !down {
             break;
@@ -243,11 +336,29 @@ pub fn paste_to(window: HWND) -> Result<()> {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    // Let the target restore the control that had focus before the panel (the paste recipient)
-    // before injecting; a few runs otherwise sent Ctrl+V during that restore and lost it.
-    std::thread::sleep(Duration::from_millis(80));
-    if foreground() != window {
-        return Err(CmdError::new("internal", "Paste target lost focus"));
+    target.restore_focus();
+    let start = Instant::now();
+    let mut stable = None;
+    while start.elapsed() < Duration::from_millis(500) {
+        if !target.valid() || foreground() != window {
+            return Err(CmdError::new("internal", "Paste target lost focus"));
+        }
+        if target.focus_ready() {
+            if stable.get_or_insert_with(Instant::now).elapsed() >= Duration::from_millis(80) {
+                break;
+            }
+        } else {
+            stable = None;
+            target.restore_focus();
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if !target.focus_ready() || stable.is_none_or(|time| time.elapsed() < Duration::from_millis(80))
+    {
+        return Err(CmdError::new(
+            "internal",
+            "Paste input control did not receive stable focus",
+        ));
     }
     let keys = [
         key(VK_CONTROL, false),
@@ -508,6 +619,122 @@ pub fn chinese_ui() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires a Windows desktop; uses only throwaway windows and does not change the clipboard"]
+    fn settings_and_owned_dialog_keep_the_original_input_focus() {
+        use windows::core::w;
+        struct Restore(HWND);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                force_foreground(self.0);
+            }
+        }
+        struct Owned(HWND);
+        impl Drop for Owned {
+            fn drop(&mut self) {
+                // SAFETY: each fixture HWND is destroyed once on its creating thread.
+                unsafe {
+                    let _ = DestroyWindow(self.0);
+                }
+            }
+        }
+        let _restore = Restore(foreground());
+        // SAFETY: built-in window classes and valid live parent handles; every window is
+        // owned by an RAII guard and positioned off-screen to avoid touching real apps.
+        unsafe {
+            let owner = Owned(
+                CreateWindowExW(
+                    WS_EX_TOOLWINDOW,
+                    w!("STATIC"),
+                    w!("Copybook focus test owner"),
+                    WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                    -10000,
+                    -10000,
+                    240,
+                    160,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            );
+            let dialog = Owned(
+                CreateWindowExW(
+                    WS_EX_TOOLWINDOW,
+                    w!("STATIC"),
+                    w!("Copybook focus test dialog"),
+                    WS_POPUP | WS_CAPTION | WS_VISIBLE,
+                    -10000,
+                    -10000,
+                    240,
+                    160,
+                    Some(owner.0),
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            );
+            let panel = Owned(
+                CreateWindowExW(
+                    WS_EX_TOOLWINDOW,
+                    w!("STATIC"),
+                    w!("Copybook focus test panel"),
+                    WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                    -10000,
+                    -10000,
+                    240,
+                    160,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            );
+            let edit = Owned(
+                CreateWindowExW(
+                    WINDOW_EX_STYLE(0),
+                    w!("EDIT"),
+                    w!("fixture"),
+                    WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                    0,
+                    0,
+                    200,
+                    24,
+                    Some(dialog.0),
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            );
+            assert!(force_foreground(dialog.0));
+            let _ = SetFocus(Some(edit.0));
+            let saved = target(edit.0, panel.0).unwrap();
+            assert_eq!(
+                saved.window, dialog.0 .0 as isize,
+                "Keep the owned dialog rather than its root owner"
+            );
+            assert_eq!(saved.focus, Some(edit.0 .0 as isize));
+            assert!(target(panel.0, panel.0).is_none());
+            assert!(force_foreground(panel.0));
+            assert!(saved.activate());
+            assert!(
+                saved.focus_ready(),
+                "Restore the original focused child even within this process"
+            );
+            let mut changed = saved;
+            changed.process = changed.process.wrapping_add(1);
+            assert!(
+                !changed.valid(),
+                "Reject a window belonging to a different process"
+            );
+            println!("same-process input accepted; owned-dialog root retained; panel rejected; original child focus restored; changed identity rejected");
+        }
+    }
 
     #[test]
     fn distinguishes_terminal_hosts_from_regular_image_consumers() {
