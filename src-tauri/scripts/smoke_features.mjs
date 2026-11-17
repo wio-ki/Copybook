@@ -144,6 +144,12 @@ try {
     await page.keyboard.press('Tab');
     await page.waitForFunction(() => document.querySelectorAll('.row').length === 45);
     assert.equal(await page.getByRole('tab', { name: '全部', exact: true }).getAttribute('aria-selected'), 'true');
+    await page.keyboard.press('Alt+Enter');
+    await page.locator('.detail').waitFor();
+    await page.keyboard.press('Tab');
+    assert.equal(await page.getByRole('tab', { name: '全部', exact: true }).getAttribute('aria-selected'), 'true');
+    await page.keyboard.press('Escape');
+    await page.locator('.detail').waitFor({ state: 'hidden' });
     await context.close();
     console.log(
       'Merge: full preview, reverse order, clipboard copy; folders: move and navigate; source/time filters combine',

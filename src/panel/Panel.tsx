@@ -339,7 +339,7 @@ export function Panel() {
       return;
     }
 
-    if (e.key === 'Tab') {
+    if (e.key === 'Tab' && !detail) {
       e.preventDefault();
       const at = FILTERS.indexOf(filter);
       changeFilter(FILTERS[(at + (e.shiftKey ? -1 : 1) + FILTERS.length) % FILTERS.length]);
