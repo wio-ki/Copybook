@@ -84,7 +84,7 @@ impl Storage {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         let version: u32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if version > 2 {
+        if version > 3 {
             return Err(CmdError::new(
                 "db",
                 "Database is newer than this application",
@@ -100,6 +100,21 @@ impl Storage {
             let tx = conn.transaction()?;
             tx.execute_batch(include_str!("../migrations/002_organize.sql"))?;
             tx.pragma_update(None, "user_version", 2)?;
+            tx.commit()?;
+        }
+        if version < 3 {
+            let tx = conn.transaction()?;
+            tx.execute_batch(include_str!("../migrations/003_folders.sql"))?;
+            let names = tx.prepare("SELECT DISTINCT group_name FROM items WHERE group_name IS NOT NULL ORDER BY group_name")?
+                .query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            for (old, path) in legacy_folder_names(&names) {
+                tx.execute(
+                    "UPDATE items SET group_name=? WHERE group_name=?",
+                    params![path, old],
+                )?;
+                insert_folders(&tx, &path)?;
+            }
+            tx.pragma_update(None, "user_version", 3)?;
             tx.commit()?;
         }
         let mut storage = Self {
@@ -382,12 +397,30 @@ impl Storage {
         Ok(result)
     }
     pub fn groups(&self) -> Result<Vec<String>> {
-        Ok(self.conn.prepare("SELECT DISTINCT group_name FROM items WHERE group_name IS NOT NULL AND favorite=1 AND deleted_at IS NULL ORDER BY group_name COLLATE NOCASE")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+        Ok(self
+            .conn
+            .prepare("SELECT path FROM favorite_folders ORDER BY path COLLATE NOCASE")?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+    pub fn create_group(&mut self, name: String) -> Result<()> {
+        let name =
+            group_name(Some(name))?.ok_or_else(|| CmdError::invalid("Folder path required"))?;
+        let tx = self.conn.transaction()?;
+        if folder_exists(&tx, &name)? {
+            return Err(CmdError::invalid("Folder already exists"));
+        }
+        insert_folders(&tx, &name)?;
+        tx.commit()?;
+        Ok(())
     }
     pub fn set_group(&mut self, ids: &[i64], group: Option<String>) -> Result<usize> {
         validate_ids(ids, 100000)?;
         let group = group_name(group)?;
         let tx = self.conn.transaction()?;
+        if let Some(path) = &group {
+            insert_folders(&tx, path)?;
+        }
         let mut count = 0;
         for id in ids {
             let found: bool = tx.query_row(
@@ -398,19 +431,63 @@ impl Storage {
             if !found {
                 return Err(CmdError::new("not_found", "Item does not exist"));
             }
-            count += tx.execute("UPDATE items SET group_name=?,favorite=CASE WHEN ?1 IS NULL THEN favorite ELSE 1 END WHERE id=?2", params![group,id])?;
+            count += tx.execute(
+                "UPDATE items SET group_name=?,favorite=1 WHERE id=?2",
+                params![group, id],
+            )?;
         }
         tx.commit()?;
         Ok(count)
     }
-    pub fn rename_group(&self, name: String, replacement: Option<String>) -> Result<usize> {
+    pub fn rename_group(&mut self, name: String, replacement: Option<String>) -> Result<usize> {
         let name =
             group_name(Some(name))?.ok_or_else(|| CmdError::invalid("Group name required"))?;
         let replacement = group_name(replacement)?;
-        Ok(self.conn.execute(
-            "UPDATE items SET group_name=? WHERE group_name=?",
-            params![replacement, name],
-        )?)
+        if replacement.as_ref().is_some_and(|r| r == &name) {
+            return Ok(0);
+        }
+        if replacement.as_ref().is_some_and(|r| in_folder(r, &name)) {
+            return Err(CmdError::invalid("Cannot move a folder into itself"));
+        }
+        let folders: Vec<_> = self
+            .groups()?
+            .into_iter()
+            .filter(|p| in_folder(p, &name))
+            .collect();
+        if folders.is_empty() {
+            return Err(CmdError::new("not_found", "Folder does not exist"));
+        }
+        let tx = self.conn.transaction()?;
+        if let Some(target) = &replacement {
+            if folder_exists(&tx, target)? {
+                return Err(CmdError::invalid("Destination folder already exists"));
+            }
+            // Validate every descendant before making any changes.
+            for path in &folders {
+                let new_path = format!("{target}{}", &path[name.len()..]);
+                group_name(Some(new_path.clone()))?;
+                if folder_exists(&tx, &new_path)? {
+                    return Err(CmdError::invalid("Destination folder already exists"));
+                }
+            }
+            for path in &folders {
+                insert_folders(&tx, &format!("{target}{}", &path[name.len()..]))?;
+            }
+        }
+        let mut count = 0;
+        for path in &folders {
+            let target = replacement
+                .as_ref()
+                .map(|r| format!("{r}{}", &path[name.len()..]));
+            // Include tombstones so undo cannot restore a stale path.
+            count += tx.execute(
+                "UPDATE items SET group_name=? WHERE group_name=?",
+                params![target, path],
+            )?;
+            tx.execute("DELETE FROM favorite_folders WHERE path=?", [path])?;
+        }
+        tx.commit()?;
+        Ok(count)
     }
     pub fn delete(&mut self, ids: &[i64]) -> Result<usize> {
         let tx = self.conn.transaction()?;
@@ -520,14 +597,28 @@ impl Storage {
     pub fn restore_records(
         &mut self,
         records: Vec<crate::backup::PreparedRecord>,
+        folders: Vec<String>,
     ) -> Result<crate::backup::RestoreResult> {
+        if folders.len() > 100000 {
+            return Err(CmdError::invalid("Too many folders"));
+        }
+        let folders = folders
+            .into_iter()
+            .map(|p| group_name(Some(p))?.ok_or_else(|| CmdError::invalid("Folder path required")))
+            .collect::<Result<Vec<_>>>()?;
         let tx = self.conn.transaction()?;
+        for path in &folders {
+            insert_folders(&tx, path)?;
+        }
         let mut written = Vec::new();
         let result = (|| -> Result<crate::backup::RestoreResult> {
             let mut imported = 0;
             let mut skipped = 0;
             for prepared in records {
                 let r = prepared.record;
+                if let Some(path) = &r.group {
+                    insert_folders(&tx, path)?;
+                }
                 let text = if r.kind == ClipKind::Files {
                     r.paths.join("\n")
                 } else {
@@ -637,15 +728,70 @@ pub fn validate_ids(ids: &[i64], max: usize) -> Result<()> {
 }
 pub fn group_name(group: Option<String>) -> Result<Option<String>> {
     let group = group.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
-    if group
-        .as_ref()
-        .is_some_and(|s| s.chars().count() > 40 || s.chars().any(char::is_control))
-    {
+    if group.as_ref().is_some_and(|s| {
+        s.split('/').count() > 32
+            || s.chars().any(char::is_control)
+            || s.split('/').any(|part| {
+                part.trim().is_empty() || part != part.trim() || part.chars().count() > 40
+            })
+    }) {
         return Err(CmdError::invalid(
-            "Group must have at most 40 characters without control characters",
+            "Folder paths support up to 32 levels, each with 1..40 trimmed characters without controls",
         ));
     }
     Ok(group)
+}
+
+fn in_folder(path: &str, folder: &str) -> bool {
+    path == folder
+        || path
+            .strip_prefix(folder)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+pub(crate) fn legacy_folder_names(names: &[String]) -> Vec<(String, String)> {
+    let mut used: std::collections::HashSet<String> =
+        names.iter().filter(|s| !s.contains('/')).cloned().collect();
+    names
+        .iter()
+        .map(|name| {
+            let base = name.replace('/', "／");
+            let mut path = base.clone();
+            if name.contains('/') {
+                let mut index = 2;
+                while used.contains(&path) {
+                    let suffix = format!(" ({index})");
+                    path = base
+                        .chars()
+                        .take(40 - suffix.chars().count())
+                        .collect::<String>()
+                        + &suffix;
+                    index += 1;
+                }
+            }
+            used.insert(path.clone());
+            (name.clone(), path)
+        })
+        .collect()
+}
+fn folder_exists(conn: &Connection, path: &str) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM favorite_folders WHERE path=?)",
+        [path],
+        |r| r.get(0),
+    )?)
+}
+fn insert_folders(conn: &Connection, path: &str) -> Result<()> {
+    for (index, _) in path.match_indices('/') {
+        conn.execute(
+            "INSERT OR IGNORE INTO favorite_folders(path) VALUES(?)",
+            [&path[..index]],
+        )?;
+    }
+    conn.execute(
+        "INSERT OR IGNORE INTO favorite_folders(path) VALUES(?)",
+        [path],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -700,7 +846,7 @@ mod tests {
         assert_eq!(db.stats().unwrap().total, 0);
         assert!(db.get(a).is_err());
         assert!(db.content(a).is_err());
-        assert!(db.groups().unwrap().is_empty());
+        assert_eq!(db.groups().unwrap(), vec!["工作"]);
         assert!(db.seen_apps().unwrap().is_empty());
         assert_eq!(db.undo_delete().unwrap(), 2);
         assert_eq!(db.get(a).unwrap().group.as_deref(), Some("工作"));
@@ -709,6 +855,115 @@ mod tests {
         assert_eq!(db.groups().unwrap(), vec!["项目"]);
         db.mark(a, "favorite", false).unwrap();
         assert!(db.get(a).unwrap().group.is_none());
+    }
+    #[test]
+    fn folders_persist_move_subtrees_and_keep_undo_consistent() {
+        let (dir, mut db, s) = setup();
+        let (a, _) = db.ingest(Capture::text("nested favorite"), &s).unwrap();
+        let (b, _) = db.ingest(Capture::text("similar prefix"), &s).unwrap();
+        db.create_group("工作/项目/空目录".into()).unwrap();
+        db.set_group(&[a], Some("工作/项目".into())).unwrap();
+        db.set_group(&[b], Some("工作台".into())).unwrap();
+        db.soft_delete(&[a]).unwrap();
+        db.rename_group("工作".into(), Some("归档/工作".into()))
+            .unwrap();
+        assert_eq!(db.undo_delete().unwrap(), 1);
+        assert_eq!(db.get(a).unwrap().group.as_deref(), Some("归档/工作/项目"));
+        assert_eq!(db.get(b).unwrap().group.as_deref(), Some("工作台"));
+        assert!(db
+            .groups()
+            .unwrap()
+            .contains(&"归档/工作/项目/空目录".into()));
+        let before = db.groups().unwrap();
+        assert!(db
+            .rename_group("归档".into(), Some("归档/工作/循环".into()))
+            .is_err());
+        assert!(db
+            .rename_group("归档/工作".into(), Some("工作台".into()))
+            .is_err());
+        assert_eq!(db.groups().unwrap(), before);
+        drop(db);
+        let mut db = Storage::open(dir.path()).unwrap();
+        assert_eq!(db.groups().unwrap(), before);
+        db.rename_group("归档/工作".into(), None).unwrap();
+        assert!(db.get(a).unwrap().favorite);
+        assert!(db.get(a).unwrap().group.is_none());
+        assert_eq!(db.get(b).unwrap().group.as_deref(), Some("工作台"));
+        assert_eq!(db.groups().unwrap().len(), 2); // 归档 and 工作台
+    }
+    #[test]
+    fn folder_validation_rollback_and_literal_names() {
+        let (_dir, mut db, s) = setup();
+        let (id, _) = db.ingest(Capture::text("root favorite"), &s).unwrap();
+        db.set_group(&[id], None).unwrap();
+        assert!(db.get(id).unwrap().favorite);
+        assert!(db
+            .set_group(&[id, i64::MAX], Some("rollback/child".into()))
+            .is_err());
+        assert!(db.groups().unwrap().is_empty());
+        for path in [
+            "/leading",
+            "trailing/",
+            "a//b",
+            "a/ b",
+            "a\nb",
+            &"a".repeat(41),
+            &vec!["a"; 33].join("/"),
+        ] {
+            assert!(db.create_group(path.into()).is_err(), "{path:?}");
+        }
+        db.create_group("100%_完成/子目录".into()).unwrap();
+        db.create_group("100X完成".into()).unwrap();
+        db.set_group(&[id], Some("100%_完成/子目录".into()))
+            .unwrap();
+        let mut q = query("", ListFilter::Favorite, 0, 50);
+        q.group = Some("100%_完成".into());
+        assert_eq!(db.list(q.clone()).unwrap().total, 0);
+        q.group = Some("100%_完成/子目录".into());
+        assert_eq!(db.matching_ids(&q).unwrap(), vec![id]);
+        db.rename_group("100%_完成".into(), None).unwrap();
+        assert_eq!(db.groups().unwrap(), vec!["100X完成"]);
+    }
+    #[test]
+    fn migrate_flat_groups_and_back_up_empty_folders() {
+        let mapping =
+            legacy_folder_names(&["旧/名称".into(), "旧／名称".into(), "旧／名称 (2)".into()]);
+        assert_eq!(mapping[0].1, "旧／名称 (3)");
+        assert_eq!(mapping[1].1, "旧／名称");
+        let (dir, db, s) = setup();
+        // Simulate a released v2 database, whose group names could contain literal '/'.
+        db.conn
+            .execute_batch("DROP TABLE favorite_folders; PRAGMA user_version=2;")
+            .unwrap();
+        db.conn.execute("INSERT INTO items(kind,hash,text,text_length,line_count,group_name,favorite,created_at,last_used_at,search_text) VALUES('text',X'01','legacy',6,1,'旧/名称',1,0,0,'legacy')", []).unwrap();
+        drop(db);
+        let mut db = Storage::open(dir.path()).unwrap();
+        assert_eq!(db.groups().unwrap(), vec!["旧／名称"]);
+        assert_eq!(
+            db.list(query("", ListFilter::Favorite, 0, 10))
+                .unwrap()
+                .items[0]
+                .group
+                .as_deref(),
+            Some("旧／名称")
+        );
+        db.create_group("空文件夹/子目录".into()).unwrap();
+        let archive = crate::backup::snapshot(&db, s).unwrap();
+        let bytes = crate::backup::encrypt(&archive, "folder password").unwrap();
+        let archive = crate::backup::decrypt(&bytes, "folder password").unwrap();
+        let (_target_dir, mut target, _) = setup();
+        target
+            .restore_records(
+                crate::backup::prepare(archive.records).unwrap(),
+                archive.folders.unwrap_or_default(),
+            )
+            .unwrap();
+        assert_eq!(target.groups().unwrap(), db.groups().unwrap());
+        let before = target.groups().unwrap();
+        assert!(target
+            .restore_records(vec![], vec!["valid".into(), "bad//path".into()])
+            .is_err());
+        assert_eq!(target.groups().unwrap(), before);
     }
     #[test]
     fn image_undo_expiry_recapture_and_restart() {
@@ -765,13 +1020,17 @@ mod tests {
         let archive = crate::backup::decrypt(&bytes, "test password").unwrap();
         let (new_dir, mut restored, _) = setup();
         let result = restored
-            .restore_records(crate::backup::prepare(archive.records).unwrap())
+            .restore_records(
+                crate::backup::prepare(archive.records).unwrap(),
+                archive.folders.unwrap_or_default(),
+            )
             .unwrap();
         assert_eq!(result.imported, 2);
         let result = restored
             .restore_records(
                 crate::backup::prepare(crate::backup::snapshot(&original, s).unwrap().records)
                     .unwrap(),
+                vec![],
             )
             .unwrap();
         assert_eq!(result.skipped, 2);
@@ -814,7 +1073,10 @@ mod tests {
         let (target_dir, mut target, _) = setup();
         // The text record sorts first; force the following image write to fail.
         fs::create_dir(target_dir.path().join("images/2.png")).unwrap();
-        assert!(target.restore_records(records).is_err());
+        assert!(target
+            .restore_records(records, vec!["empty/folder".into()])
+            .is_err());
+        assert!(target.groups().unwrap().is_empty());
         assert_eq!(target.stats().unwrap().total, 0);
         assert!(!target_dir.path().join("images/2.thumb.png").exists());
     }

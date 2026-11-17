@@ -31,6 +31,7 @@ if (server) {
 const browser = await chromium.launch({ channel: 'msedge', headless: true, args: ['--no-proxy-server'] });
 const errors = [];
 mkdirSync('.review/shots/v140', { recursive: true });
+mkdirSync('.review/shots/v150', { recursive: true });
 async function open(url, viewport = { width: 384, height: 576 }) {
   const context = await browser.newContext({
     viewport,
@@ -121,13 +122,16 @@ try {
     await page.getByRole('dialog').getByRole('button', { name: '复制', exact: true }).click();
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
     assert.ok((await page.evaluate(() => navigator.clipboard.readText())).length > 10);
-    await page.locator('.selection-bar').getByRole('button', { name: '分组', exact: true }).click();
-    await page.getByRole('dialog').locator('input').fill('工作');
-    await page.getByRole('button', { name: '保存', exact: true }).click();
+    await backend(page, async () => (await import('/src/shared/api.ts')).api.createGroup('工作/项目'));
+    await page.locator('.selection-bar').getByRole('button', { name: '移至文件夹', exact: true }).click();
+    await page.getByLabel('目标文件夹', { exact: true }).selectOption('工作/项目');
+    await page.getByRole('dialog').getByRole('button', { name: '移动', exact: true }).click();
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
     await page.locator('.row-group').first().waitFor();
+    await page.getByRole('tab', { name: '收藏', exact: true }).click();
+    await page.locator('[data-folder="工作"] .folder-open').click();
+    await page.locator('[data-folder="工作/项目"] .folder-open').click();
     await page.getByRole('button', { name: '筛选', exact: true }).click();
-    await page.getByLabel('收藏分组', { exact: true }).selectOption({ label: '工作' });
     await page.waitForFunction(() => document.querySelectorAll('.row').length === 2);
     await page.screenshot({ path: '.review/shots/v140/group-filter.png' });
     await page.getByLabel('来源应用', { exact: true }).selectOption({ label: 'Windows Terminal' });
@@ -138,8 +142,100 @@ try {
     await page.locator('.row').first().waitFor();
     await context.close();
     console.log(
-      'Merge: full preview, reverse order, clipboard copy; groups: assign and filter; source/time filters combine',
+      'Merge: full preview, reverse order, clipboard copy; folders: move and navigate; source/time filters combine',
     );
+  }
+  {
+    const { context, page } = await open('/panel.html?lang=zh-CN');
+    await page.locator('.row').first().waitFor();
+    assert.equal(await page.getByRole('button', { name: '分组', exact: true }).count(), 0);
+    await page.getByRole('tab', { name: '收藏', exact: true }).click();
+    const create = async (name) => {
+      await page.getByRole('button', { name: '新建文件夹', exact: true }).click();
+      await page.getByLabel('文件夹名称', { exact: true }).fill(name);
+      await page.getByRole('dialog').getByRole('button', { name: '保存', exact: true }).click();
+      await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    };
+    const enter = async (path) => page.locator(`[data-folder="${path}"] .folder-open`).click();
+    const action = async (path, label) => {
+      await page.locator(`[data-folder="${path}"] > .icon-btn`).click();
+      await page.getByRole('menuitem', { name: label }).click();
+    };
+    await create('工作');
+    await action('工作', '新建子文件夹');
+    await page.getByLabel('文件夹名称', { exact: true }).fill('项目');
+    await page.getByRole('dialog').getByRole('button', { name: '保存', exact: true }).click();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    await enter('工作');
+    await enter('工作/项目');
+    await create('资料');
+    const movedIds = await backend(page, async () => {
+      const api = (await import('/src/shared/api.ts')).api;
+      const { items } = await api.listItems({ query: '', filter: 'text', offset: 0, limit: 2 });
+      const ids = items.map((i) => i.id);
+      await api.setItemGroup(ids, '工作/项目/资料');
+      return ids;
+    });
+    await enter('工作/项目/资料');
+    await page.waitForFunction(() => document.querySelectorAll('.row').length === 2);
+    await page.getByRole('button', { name: '多选', exact: true }).click();
+    await page.getByRole('button', { name: '全选结果', exact: true }).click();
+    await page.getByText('已选 2 条', { exact: true }).waitFor();
+    await page.getByRole('button', { name: '移至文件夹', exact: true }).click();
+    await page.getByLabel('目标文件夹', { exact: true }).selectOption('工作/项目');
+    await page.getByRole('dialog').getByRole('button', { name: '移动', exact: true }).click();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    await page.waitForFunction(() => document.querySelectorAll('.row').length === 0);
+    await page.getByRole('button', { name: '返回上一级', exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll('.row').length === 2);
+    await page.screenshot({ path: '.review/shots/v150/nested-folders.png' });
+    await page.getByRole('navigation', { name: '收藏目录' }).getByRole('button', { name: '收藏', exact: true }).click();
+    await action('工作', '重命名');
+    await page.getByLabel('文件夹名称', { exact: true }).fill('办公');
+    await page.getByRole('dialog').getByRole('button', { name: '保存', exact: true }).click();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    await page.locator('[data-folder="办公"]').waitFor();
+    assert.ok((await backend(page, async () => (await import('/src/shared/api.ts')).api.listGroups())).includes('办公/项目/资料'));
+    await create('归档');
+    await action('办公', '移动文件夹');
+    await page.getByLabel('目标目录', { exact: true }).selectOption('归档');
+    await page.getByRole('dialog').getByRole('button', { name: '保存', exact: true }).click();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    await enter('归档');
+    await page.locator('[data-folder="归档/办公"]').waitFor();
+    await page.getByRole('button', { name: '返回上一级', exact: true }).click();
+    await action('归档', '移除文件夹');
+    await page.getByRole('dialog').getByRole('button', { name: '移除', exact: true }).click();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    const result = await page.evaluate(async (ids) => {
+      const api = (await import('/src/shared/api.ts')).api;
+      return Promise.all(ids.map((id) => api.getItem(id)));
+    }, movedIds);
+    assert.ok(result.every((i) => i.favorite && i.group == null));
+    assert.deepEqual(await backend(page, async () => (await import('/src/shared/api.ts')).api.listGroups()), []);
+    await context.close();
+    console.log('Folders: create empty folders, three levels, breadcrumbs, batch moves, subtree rename/move/remove preserve favorites');
+  }
+  for (const lang of ['zh-CN', 'en-US']) {
+    for (const width of [320, 384, 480]) {
+      const { context, page } = await open(`/panel.html?lang=${lang}`, { width, height: 576 });
+      await page.locator('.row').first().waitFor();
+      await backend(page, async () => {
+        const api = (await import('/src/shared/api.ts')).api;
+        await api.createGroup('工作文件夹名称测试'.repeat(4).slice(0, 40) + '/项目/资料');
+      });
+      await page.getByRole('tab', { name: lang === 'zh-CN' ? '收藏' : 'Starred', exact: true }).click();
+      await page.locator('.folder-open').first().waitFor();
+      await page.waitForFunction(() => document.querySelectorAll('.row').length === 2);
+      await page.screenshot({ path: `.review/shots/v150/folders-${lang}-${width}.png` });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      assert.equal(await page.getByRole('button', { name: lang === 'zh-CN' ? '分组' : 'Groups', exact: true }).count(), 0);
+      await page.locator('.folder-open').first().click();
+      await page.waitForFunction(() => document.querySelectorAll('.row').length === 0);
+      await page.screenshot({ path: `.review/shots/v150/folders-nested-${lang}-${width}.png` });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      await context.close();
+    }
   }
   for (const lang of ['zh-CN', 'en-US']) {
     const { context, page } = await open(`/settings.html?lang=${lang}#data`, { width: 760, height: 650 });

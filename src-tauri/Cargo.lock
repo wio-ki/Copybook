@@ -703,7 +703,7 @@ dependencies = [
 
 [[package]]
 name = "copybook"
-version = "1.4.2"
+version = "1.5.0"
 dependencies = [
  "aes-gcm",
  "argon2",

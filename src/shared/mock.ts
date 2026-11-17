@@ -204,6 +204,15 @@ export function createMockBackend(): Backend {
     ...(params.has('plain') ? { pastePlain: true } : {}),
     ...(params.get('source') === '0' ? { showSource: false } : {}),
   };
+  const folders = new Set<string>();
+  const addFolder = (path: string) => {
+    const parts = path.split('/');
+    for (let i = 1; i <= parts.length; i++) folders.add(parts.slice(0, i).join('/'));
+  };
+  const validateFolder = (path: string) => {
+    if (!path || path.split('/').length > 32 || /[\x00-\x1f\x7f]/.test(path) || path.split('/').some((part) => !part || part !== part.trim() || [...part].length > 40)) throw { code: 'invalid' };
+  };
+  const inFolder = (path: string, parent: string) => path === parent || path.startsWith(parent + '/');
   let undo: { items: ClipItem[]; deadline: number } | null = null;
   let paused = params.has('paused');
   let elevated = params.get('admin') === '1';
@@ -342,9 +351,39 @@ export function createMockBackend(): Backend {
       return ids.map(id=>find(id).text).join(separator);
     },
     async copyMerged(ids, separator) { const value = ids.map(id=>find(id).text).join(separator); await navigator.clipboard.writeText(value); },
-    async listGroups() { return [...new Set(items.filter(i=>i.favorite && i.group).map(i=>i.group!))].sort(); },
-    async setItemGroup(ids, group) { ids.forEach(id=>{ const item=find(id); item.group=group?.trim() || null; if(item.group) item.favorite=true; }); changed('updated',null); return ids.length; },
-    async renameGroup(name, replacement) { let n=0; items.forEach(i=>{if(i.group===name){i.group=replacement;n++;}}); changed('updated',null); return n; },
+    async listGroups() { return [...folders].sort(); },
+    async createGroup(name) {
+      validateFolder(name);
+      if (folders.has(name)) throw { code: 'invalid' };
+      addFolder(name); changed('updated', null);
+    },
+    async setItemGroup(ids, group) {
+      const path = group?.trim() || null;
+      if (path) validateFolder(path);
+      const targets = ids.map(find);
+      if (path) addFolder(path);
+      targets.forEach((item) => { item.group = path; item.favorite = true; });
+      changed('updated', null); return ids.length;
+    },
+    async renameGroup(name, replacement) {
+      const descendants = [...folders].filter((p) => inFolder(p, name));
+      if (!descendants.length) throw { code: 'not_found' };
+      if (replacement === name) return 0;
+      if (replacement != null) {
+        validateFolder(replacement);
+        if (inFolder(replacement, name) || folders.has(replacement)) throw { code: 'invalid' };
+        descendants.forEach((p) => validateFolder(replacement + p.slice(name.length)));
+        descendants.forEach((p) => addFolder(replacement + p.slice(name.length)));
+      }
+      let n = 0;
+      [...items, ...(undo?.items ?? [])].forEach((item) => {
+        if (item.group && inFolder(item.group, name)) {
+          item.group = replacement == null ? null : replacement + item.group.slice(name.length); n++;
+        }
+      });
+      descendants.forEach((p) => folders.delete(p));
+      changed('updated', null); return n;
+    },
     async webdavTest() { throw {code:'network',message:'WebDAV is available in the desktop app'}; },
     async webdavList() { throw {code:'network'}; },
     async webdavBackup() { throw {code:'network'}; },

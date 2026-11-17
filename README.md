@@ -24,7 +24,7 @@ Copybook 常驻托盘，记下你复制的文字、富文本、图片和文件�
 - **搜索**：全文搜索，一两个汉字也能搜；可按 文本 / 图片 / 文件 / 链接 / 收藏 筛选；备注也能被搜到。
 - **整理**：收藏、置顶、给记录写备注（以朱红色批注显示）。
 - **批量操作**：Ctrl / Shift 多选、全选完整筛选结果、批量删除，15 秒内可撤销；多条文字按自选分隔符合并复制。
-- **筛选与分组**：关键词、类型、来源应用、起止日期组合筛选；收藏支持命名分组、重命名和移出分组。
+- **筛选与文件夹**：关键词、类型、来源应用、起止日期组合筛选；收藏支持多级文件夹、空目录和面包屑导航，直接在目录中重命名、移动或移除文件夹，单条或批量移动收藏。
 - **加密备份**：「偏好设置 → 数据」通过 WebDAV 备份与合并恢复，默认使用 `copybook/` 子目录；历史、图片和设置在本机用密码加密后上传，密码不会保存。详见 [v1.4.0 说明](docs/releases/v1.4.0.md) 与 [v1.4.1 修复](docs/releases/v1.4.1.md)。
 - **来源**：可在「偏好设置 → 通用 → 面板」中关闭来源应用的名称和图标显示。
 - **粘贴**：<kbd>Enter</kbd> 粘贴，<kbd>Shift</kbd>+<kbd>Enter</kbd> 换一种格式（纯文本 / 原格式），
@@ -46,7 +46,8 @@ Copybook 常驻托盘，记下你复制的文字、富文本、图片和文件�
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Ctrl</kbd>+<kbd>P</kbd> | 收藏 / 置顶 |
 | <kbd>Ctrl</kbd>+<kbd>Del</kbd> | 删除 |
 | <kbd>Tab</kbd> | 切换分类 |
-| <kbd>Esc</kbd> | 清空搜索 / 关闭面板 |
+| <kbd>Esc</kbd> | 退出多选 / 清空搜索 / 返回上级收藏目录 / 关闭面板 |
+| <kbd>F2</kbd> | 文件夹按钮获得焦点时重命名 |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | 偏好设置 |
 
 ## 安装
@@ -111,6 +112,11 @@ images, files, links and starred items; stars, pins and notes; <kbd>Shift</kbd>+
 for plain text; <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>1</kbd>–<kbd>9</kbd> quick paste; respects password-manager
 "do not record" hints and skips keys and tokens; optional <kbd>Win</kbd>+<kbd>V</kbd> takeover;
 light and dark themes; Chinese and English UI. Everything stays on your computer.
+
+Favorites supports persistent nested folders, including empty directories, with breadcrumbs
+and an All favorites view. Rename (F2), move or remove folders from their directory menu;
+move individual items or a selection using Move to folder. Removing folders keeps their items
+starred at the root. Encrypted WebDAV backups preserve the folder hierarchy and empty folders.
 
 Source app names/icons can be hidden in Preferences → General → Panel. From v1.3.0,
 Preferences → About downloads and verifies signed updates, installs over the existing app

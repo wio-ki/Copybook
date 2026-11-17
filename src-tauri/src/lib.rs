@@ -159,6 +159,7 @@ pub fn run() {
             commands::get_merged_text,
             commands::copy_merged,
             commands::list_groups,
+            commands::create_group,
             commands::set_item_group,
             commands::rename_group,
             commands::webdav_test,

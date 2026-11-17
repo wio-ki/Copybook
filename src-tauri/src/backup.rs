@@ -60,6 +60,8 @@ pub struct Archive {
     pub schema: u32,
     pub settings: Settings,
     pub records: Vec<Record>,
+    #[serde(default)]
+    pub folders: Option<Vec<String>>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -195,9 +197,28 @@ pub fn decrypt(bytes: &[u8], password: &str) -> Result<Archive> {
     if json.len() > MAX_BYTES {
         return Err(too_large());
     }
-    let archive: Archive = serde_json::from_slice(&json).map_err(|_| invalid())?;
+    let mut archive: Archive = serde_json::from_slice(&json).map_err(|_| invalid())?;
     if archive.schema != 1 {
         return Err(invalid());
+    }
+    if archive.folders.is_none() {
+        // Backups predating folders contain flat names, including literal slashes.
+        let names: Vec<_> = archive
+            .records
+            .iter()
+            .filter_map(|r| r.group.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let mapping: std::collections::HashMap<_, _> = crate::storage::legacy_folder_names(&names)
+            .into_iter()
+            .collect();
+        for record in &mut archive.records {
+            if let Some(name) = &record.group {
+                record.group = mapping.get(name).cloned();
+            }
+        }
+        archive.folders = Some(mapping.into_values().collect());
     }
     Ok(archive)
 }
@@ -322,6 +343,7 @@ pub fn snapshot(db: &Storage, settings: Settings) -> Result<Archive> {
         schema: 1,
         settings,
         records,
+        folders: Some(db.groups()?),
     })
 }
 fn read_limited(reader: impl Read, limit: usize) -> Result<Vec<u8>> {
@@ -585,6 +607,7 @@ mod tests {
             schema: 1,
             settings: Settings::default(),
             records: vec![],
+            folders: Some(vec![]),
         };
         let a = encrypt(&archive, "test password 中文").unwrap();
         let b = encrypt(&archive, "test password 中文").unwrap();
@@ -601,6 +624,23 @@ mod tests {
         }
         assert!(decrypt(b"not a backup", "test password 中文").is_err());
         assert!(encrypt(&archive, "short").is_err());
+    }
+    #[test]
+    fn old_backups_default_to_flat_folders() {
+        let (_dir, mut db, settings) = {
+            let dir = tempfile::tempdir_in(crate::test_dir()).unwrap();
+            let db = Storage::open(dir.path()).unwrap();
+            (dir, db, Settings::default())
+        };
+        let (id, _) = db.ingest(Capture::text("old backup"), &settings).unwrap();
+        db.set_group(&[id], Some("旧组".into())).unwrap();
+        let mut archive = snapshot(&db, settings).unwrap();
+        archive.folders = None;
+        archive.records[0].group = Some("旧/名称".into());
+        let bytes = encrypt(&archive, "old backup password").unwrap();
+        let archive = decrypt(&bytes, "old backup password").unwrap();
+        assert_eq!(archive.records[0].group.as_deref(), Some("旧／名称"));
+        assert_eq!(archive.folders.unwrap(), vec!["旧／名称"]);
     }
     #[test]
     fn restrict_urls_and_remote_names() {
@@ -757,6 +797,7 @@ mod tests {
             schema: 1,
             settings: Settings::default(),
             records: vec![],
+            folders: Some(vec![]),
         };
         test_connection(&connection).unwrap();
         let entry = upload(&connection, &archive, "backup password").unwrap();

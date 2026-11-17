@@ -1,4 +1,4 @@
-import { CheckSquare, Filter, FolderPlus, Undo2, X } from 'lucide-react';
+import { CheckSquare, Filter, Undo2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { api, toCmdError } from '../shared/api';
 import { useApp } from '../shared/app';
@@ -24,7 +24,7 @@ export function useOrganizer(p: Props) {
   const [groups, setGroups] = useState<string[]>([]);
   const [sources, setSources] = useState<SeenApp[]>([]);
   const [filters, setFilters] = useState(false);
-  const [dialog, setDialog] = useState<'delete' | 'merge' | 'group' | 'manage' | null>(null);
+  const [dialog, setDialog] = useState<'delete' | 'merge' | 'group' | null>(null);
   const [targets, setTargets] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   const [separator, setSeparator] = useState('\n');
@@ -32,7 +32,6 @@ export function useOrganizer(p: Props) {
   const [preview, setPreview] = useState<string | null>(null);
   const [mergeError, setMergeError] = useState(false);
   const [draft, setDraft] = useState('');
-  const [rename, setRename] = useState('');
   const [undoUntil, setUndoUntil] = useState(0);
   const [undoCount, setUndoCount] = useState(0);
   const anchor = useRef<number | null>(null);
@@ -194,7 +193,7 @@ export function useOrganizer(p: Props) {
     setTargets(values);
     setPreview(null);
     setReverse(false);
-    setDraft('');
+    setDraft(p.options.group ?? '');
     setDialog(action);
   };
   const onKey = (e: KeyboardEvent) => {
@@ -282,7 +281,8 @@ export function useOrganizer(p: Props) {
       {label}
     </button>
   );
-  const filterCount = Object.values(p.options).filter((v) => v != null && v !== '').length;
+  const filterCount = Object.entries(p.options).filter(([key, v]) => key !== 'group' && v != null && v !== '').length;
+  const resetFilters = () => p.setOptions({ group: p.options.group });
   const controls = (
     <>
       <div className="organizer-tools">
@@ -310,19 +310,7 @@ export function useOrganizer(p: Props) {
           {zh ? '筛选' : 'Filter'}
           {filterCount ? ` (${filterCount})` : ''}
         </button>
-        <button
-          type="button"
-          className="btn btn--quiet"
-          onClick={() => {
-            setDraft('');
-            setRename('');
-            setDialog('manage');
-          }}
-        >
-          <FolderPlus size={14} />
-          {zh ? '分组' : 'Groups'}
-        </button>
-        {filterCount > 0 && button(zh ? '重置' : 'Reset', () => p.setOptions({}))}
+        {filterCount > 0 && button(zh ? '重置' : 'Reset', resetFilters)}
       </div>
       {filters && (
         <div className="advanced-filters">
@@ -337,27 +325,6 @@ export function useOrganizer(p: Props) {
               {sources.map((s) => (
                 <option key={s.exe} value={s.exe}>
                   {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            {zh ? '收藏分组' : 'Favorite group'}
-            <select
-              aria-label={zh ? '收藏分组' : 'Favorite group'}
-              value={p.options.group == null ? 'all' : `group:${p.options.group}`}
-              onChange={(e) =>
-                p.setOptions({
-                  ...p.options,
-                  group: e.target.value === 'all' ? null : e.target.value.slice(6),
-                })
-              }
-            >
-              <option value="all">{zh ? '全部分组' : 'All groups'}</option>
-              <option value="group:">{zh ? '未分组收藏' : 'Ungrouped favorites'}</option>
-              {groups.map((g) => (
-                <option key={g} value={`group:${g}`}>
-                  {g}
                 </option>
               ))}
             </select>
@@ -398,7 +365,7 @@ export function useOrganizer(p: Props) {
           {button(zh ? '全选结果' : 'Select results', () => void selectAll())}
           {button(zh ? '删除' : 'Delete', () => requestDelete(ids), !ids.length)}
           {button(zh ? '合并' : 'Merge', () => open('merge'), !ids.length || ids.length > 1000)}
-          {button(zh ? '分组' : 'Group', () => open('group'), !ids.length)}
+          {button(zh ? '移至文件夹' : 'Move to folder', () => open('group'), !ids.length)}
           <button className="icon-btn" aria-label={zh ? '退出多选' : 'Exit selection'} onClick={reset}>
             <X size={14} />
           </button>
@@ -428,13 +395,9 @@ export function useOrganizer(p: Props) {
             ? zh
               ? '合并复制'
               : 'Merge and copy'
-            : dialog === 'manage'
-              ? zh
-                ? '管理收藏分组'
-                : 'Manage favorite groups'
-              : zh
-                ? '设置收藏分组'
-                : 'Set favorite group'
+            : zh
+              ? '移至收藏文件夹'
+              : 'Move to favorite folder'
       }
       onClose={() => {
         if (!busy) setDialog(null);
@@ -525,110 +488,29 @@ export function useOrganizer(p: Props) {
       {dialog === 'group' && (
         <>
           <label>
-            {zh ? '分组名称（留空移出分组）' : 'Group name (empty to ungroup)'}
-            <input
-              list="favorite-groups"
-              maxLength={40}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-            />
-          </label>
-          <datalist id="favorite-groups">
-            {groups.map((g) => (
-              <option key={g} value={g} />
-            ))}
-          </datalist>
-          <p>{zh ? '添加到分组会同时收藏所选记录。' : 'Grouping also favorites the selected items.'}</p>
-          <div className="feature-actions">
-            {button(zh ? '取消' : 'Cancel', () => setDialog(null))}
-            <button
-              className="btn btn--primary"
-              disabled={busy}
-              onClick={() => {
-                setBusy(true);
-                void api
-                  .setItemGroup(targets, draft.trim() || null)
-                  .then(() => {
-                    setDialog(null);
-                    reset();
-                  })
-                  .catch(error)
-                  .finally(() => setBusy(false));
-              }}
-            >
-              {zh ? '保存' : 'Save'}
-            </button>
-          </div>
-        </>
-      )}
-      {dialog === 'manage' && (
-        <>
-          <label>
-            {zh ? '选择分组' : 'Choose group'}
-            <select
-              value={draft}
-              onChange={(e) => {
-                setDraft(e.target.value);
-                setRename(e.target.value);
-              }}
-            >
-              <option value="">{zh ? '选择…' : 'Choose…'}</option>
-              {groups.map((g) => (
-                <option key={g}>{g}</option>
-              ))}
+            {zh ? '目标文件夹' : 'Destination folder'}
+            <select aria-label={zh ? '目标文件夹' : 'Destination folder'} value={draft} onChange={(e) => setDraft(e.target.value)}>
+              <option value="">{zh ? '收藏根目录' : 'Favorites root'}</option>
+              {groups.map((g) => <option key={g} value={g}>{g.replaceAll('/', ' / ')}</option>)}
             </select>
           </label>
-          <label>
-            {zh ? '新名称' : 'New name'}
-            <input maxLength={40} value={rename} onChange={(e) => setRename(e.target.value)} />
-          </label>
-          <p>
-            {zh
-              ? '移除分组保留其中的收藏记录。可在单条右键菜单或多选工具栏中创建分组。'
-              : 'Removing a group keeps its favorites. Create groups from an item menu or the selection toolbar.'}
-          </p>
+          <p>{zh ? '移动后会收藏所选记录。在“收藏”目录中创建和管理文件夹。' : 'Moving items also favorites them. Create and manage folders in Favorites.'}</p>
           <div className="feature-actions">
-            {button(zh ? '关闭' : 'Close', () => setDialog(null))}
-            {button(
-              zh ? '移除分组' : 'Remove group',
-              () => {
-                setBusy(true);
-                void api
-                  .renameGroup(draft, null)
-                  .then(() => {
-                    setDraft('');
-                    setRename('');
-                    p.setOptions({ ...p.options, group: null });
-                  })
-                  .catch(error)
-                  .finally(() => setBusy(false));
-              },
-              !draft,
-            )}
-            <button
-              className="btn btn--primary"
-              disabled={busy || !draft || !rename.trim()}
-              onClick={() => {
-                setBusy(true);
-                void api
-                  .renameGroup(draft, rename.trim())
-                  .then(() => {
-                    if (p.options.group === draft) p.setOptions({ ...p.options, group: rename.trim() });
-                    setDraft('');
-                    setRename('');
-                  })
-                  .catch(error)
-                  .finally(() => setBusy(false));
-              }}
-            >
-              {zh ? '重命名' : 'Rename'}
-            </button>
+            {button(zh ? '取消' : 'Cancel', () => setDialog(null))}
+            <button className="btn btn--primary" disabled={busy} onClick={() => {
+              setBusy(true);
+              void api.setItemGroup(targets, draft || null).then(async () => {
+                setDialog(null);
+                reset();
+                await p.refresh();
+              }).catch(error).finally(() => setBusy(false));
+            }}>{zh ? '移动' : 'Move'}</button>
           </div>
         </>
       )}
     </FeatureDialog>
   );
-  return { mode, ids, select, onKey, reset, requestDelete, open, controls, dialogs };
+  return { groups, mode, ids, select, onKey, reset, requestDelete, open, controls, dialogs };
 }
 function localDate(ms: number) {
   const date = new Date(ms);

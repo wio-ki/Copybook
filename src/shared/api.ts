@@ -33,6 +33,7 @@ export interface Backend {
   getMergedText(ids: number[], separator: string): Promise<string>;
   copyMerged(ids: number[], separator: string): Promise<void>;
   listGroups(): Promise<string[]>;
+  createGroup(name: string): Promise<void>;
   setItemGroup(ids: number[], group: string | null): Promise<number>;
   renameGroup(name: string, replacement: string | null): Promise<number>;
   webdavTest(connection: WebDavConnection): Promise<void>;
@@ -116,6 +117,7 @@ async function createTauriBackend(): Promise<Backend> {
     getMergedText: (ids, separator) => call('get_merged_text', { ids, separator }),
     copyMerged: (ids, separator) => call('copy_merged', { ids, separator }),
     listGroups: () => call('list_groups'),
+    createGroup: (name) => call('create_group', { name }),
     setItemGroup: (ids, group) => call('set_item_group', { ids, group }),
     renameGroup: (name, replacement) => call('rename_group', { name, replacement }),
     webdavTest: (connection) => call('webdav_test', { connection }),

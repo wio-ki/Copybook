@@ -1,4 +1,33 @@
-# Copybook — frontend/backend contract (v1.4.1)
+# Copybook — frontend/backend contract (v1.5.0)
+
+## v1.5 favorite folders (take precedence below)
+
+* Favorite groups are persistent virtual folder paths separated by `/`, with up to 32
+  levels and 1..40 trimmed, nonempty Unicode characters per component; control characters
+  are rejected. Folder identity is case-sensitive. Existing flat groups migrate to folders;
+  literal slashes in old names become full-width slashes, with a suffix on name collisions.
+* `list_groups({}) -> string[]` lists every folder path, including empty folders and parents.
+  `create_group({ name }) -> void` creates a folder and missing ancestors. An existing
+  destination is rejected. The TypeScript method is `createGroup(name)`.
+* `set_item_group({ ids, group }) -> number` atomically moves items to a folder and favorites
+  them, creating missing ancestors. Null or empty means the Favorites root and also favorites
+  items. Unfavoriting clears the item path, preserving the empty folder.
+* `rename_group({ name, replacement }) -> number` atomically renames/moves a folder and its
+  whole subtree, including empty folders and temporarily deleted records. Reject moves into
+  itself, path-limit violations and existing destinations. Null removes the entire subtree,
+  moves its items to the Favorites root and preserves favorite flags. Returns affected items.
+* `ListQuery.group` remains exact: null includes all folders, empty includes root favorites,
+  and a path includes only its direct items. Search, source/date filters, pagination and
+  select-all all use that same scope. Folder rows are never selected or merged as clip items.
+* Favorites opens at its root, showing direct child folders followed by root items.
+  Breadcrumbs and Up/Escape navigate levels; All favorites shows every favorite. Changing
+  category clears the folder scope. The standalone Groups button and group-management
+  dialog are removed. Folder menus provide New subfolder, Rename (F2), Move and Remove;
+  item menus and the selection toolbar offer Move to folder with a hierarchical destination.
+* Backup JSON adds optional `folders: string[]` (default empty for old backups). New backups
+  preserve empty directories. Folder validation and insertion share the record transaction,
+  so a failed restore changes neither items nor folders. The encrypted format stays v1.
+
 
 ## v1.4.1 fixes (take precedence below)
 

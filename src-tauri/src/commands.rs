@@ -125,6 +125,15 @@ pub async fn list_groups(app: AppHandle) -> Result<Vec<String>> {
     blocking(app, |a| a.state::<AppState>().db(|db| db.groups())).await
 }
 #[tauri::command]
+pub async fn create_group(app: AppHandle, name: String) -> Result<()> {
+    blocking(app, move |a| {
+        a.state::<AppState>().db(|db| db.create_group(name))?;
+        shell::changed(a, "updated", None);
+        Ok(())
+    })
+    .await
+}
+#[tauri::command]
 pub async fn set_item_group(app: AppHandle, ids: Vec<i64>, group: Option<String>) -> Result<usize> {
     blocking(app, move |a| {
         let count = a.state::<AppState>().db(|db| db.set_group(&ids, group))?;
@@ -200,7 +209,9 @@ pub async fn webdav_restore(
             map.remove(key);
         }
         a.state::<AppState>().settings()?.patch(patch.clone())?;
-        let mut result = a.state::<AppState>().db(|db| db.restore_records(records))?;
+        let mut result = a
+            .state::<AppState>()
+            .db(|db| db.restore_records(records, archive.folders.unwrap_or_default()))?;
         shell::changed(a, "added", None);
         if restore_settings {
             result.settings_restored = Some(match shell::update(a, patch) {

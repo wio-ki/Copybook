@@ -28,6 +28,7 @@ import { Detail } from './Detail';
 import { EmptyState } from './EmptyState';
 import { useHistory } from './useHistory';
 import { useOrganizer } from './Organizer';
+import { FavoriteFolders, folderParent } from './FavoriteFolders';
 
 const FILTERS: ListFilter[] = ['all', 'text', 'image', 'files', 'url', 'favorite'];
 
@@ -81,6 +82,7 @@ export function Panel() {
       api.on('panel://shown', ({ locked: isLocked }) => {
         setQuery('');
         setFilter('all');
+        setOptions((previous) => ({ ...previous, group: null }));
         setSelectedId(null);
         setDetailId(null);
         setMenu(null);
@@ -110,7 +112,7 @@ export function Panel() {
   useEffect(() => {
     setSelectedId(null);
     listRef.current?.scrollTo({ top: 0 });
-  }, [query, filter]);
+  }, [query, filter, options.group]);
 
   // Keep the selection visible during keyboard travel.
   useLayoutEffect(() => {
@@ -299,6 +301,7 @@ export function Panel() {
   const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
   onKey.current = (e: KeyboardEvent) => {
     if (e.isComposing || e.keyCode === 229 || menu || clearing) return;
+    if ((e.target as HTMLElement | null)?.closest('.favorite-folders')) return;
     if (organizer.onKey(e)) return;
     if ((e.target as HTMLElement | null)?.closest('.organizer-tools, .selection-bar, .advanced-filters, .undo-bar')) return;
     const mod = e.ctrlKey || e.metaKey;
@@ -320,6 +323,7 @@ export function Panel() {
         setDetailId(null);
         focusSearch();
       } else if (query) setQuery('');
+      else if (filter === 'favorite' && options.group) setOptions({ ...options, group: folderParent(options.group) });
       else hide();
       return;
     }
@@ -458,7 +462,7 @@ export function Panel() {
       keys: ['Ctrl+P'],
       run: () => void togglePin(item),
     });
-    entries.push({ id: 'group', label: lang === 'zh-CN' ? '设置收藏分组' : 'Set favorite group', icon: FolderOpen, run: () => organizer.open('group', [item.id]) });
+    entries.push({ id: 'group', label: lang === 'zh-CN' ? '移至收藏文件夹' : 'Move to favorite folder', icon: FolderOpen, run: () => organizer.open('group', [item.id]) });
     entries.push({ id: 'detail', label: t.actions.detail, icon: Info, keys: ['Alt+↵'], run: () => setDetailId(item.id) });
     if (item.subKind === 'url') {
       const url = /^[a-z][a-z0-9+.-]*:/i.test(item.text.trim()) ? item.text.trim() : `https://${item.text.trim()}`;
@@ -621,7 +625,12 @@ export function Panel() {
             aria-selected={filter === f}
             className={`tab${filter === f ? ' is-active' : ''}`}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setFilter(f)}
+            onClick={() => {
+              if (f !== filter) {
+                setFilter(f);
+                setOptions({ ...options, group: f === 'favorite' ? '' : null });
+              }
+            }}
           >
             {t.filters[f]}
           </button>
@@ -630,7 +639,11 @@ export function Panel() {
 
       {organizer.controls}
       <div className="panel-body">
-        <div ref={listRef} id="clip-list" className="list" role="listbox" tabIndex={0} aria-multiselectable={organizer.mode} aria-label={t.filters[filter]}>
+        <div ref={listRef} className="list">
+          {filter === 'favorite' && <FavoriteFolders groups={organizer.groups} current={options.group ?? null}
+            navigate={(group) => { setOptions({ ...options, group }); setDetailId(null); setMenu(null); }}
+            notify={showToast} refresh={refresh} />}
+          <div id="clip-list" role="listbox" tabIndex={0} aria-multiselectable={organizer.mode} aria-label={t.filters[filter]}>
           {items.map((item, i) => (
             <ClipRow
               key={item.id}
@@ -651,7 +664,8 @@ export function Panel() {
             />
           ))}
           {items.length > 0 && items.length < total && <div ref={sentinelRef} className="sentinel" />}
-          {empty}
+          {!(status === 'ready' && filter === 'favorite' && !query.trim() && organizer.groups.some((g) => folderParent(g) === options.group)) && empty}
+          </div>
         </div>
 
         {detail && (
