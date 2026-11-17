@@ -5,6 +5,26 @@ use tauri::{AppHandle, Manager};
 
 static EXPORT_GATE: Mutex<()> = Mutex::new(());
 
+pub fn copy_merged(app: &AppHandle, ids: &[i64], separator: &str) -> Result<()> {
+    let state = app.state::<AppState>();
+    let content = state.db(|db| {
+        let text = db.merged_text(ids, separator)?;
+        let mut content = db.content(ids[0])?;
+        content.text = text;
+        content.html = None;
+        content.rtf = None;
+        Ok(content)
+    })?;
+    let owner = app
+        .get_webview_window("panel")
+        .ok_or_else(CmdError::internal)?
+        .hwnd()
+        .map_err(|_| CmdError::internal())?;
+    state
+        .writer
+        .write(&content, true, platform::hwnd(owner.0 as isize))
+}
+
 fn terminal_image_path(
     content: &crate::storage::StoredContent,
     dir: &Path,

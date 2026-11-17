@@ -749,6 +749,7 @@ mod tests {
                     filter: ListFilter::All,
                     offset: 0,
                     limit: 50,
+                    ..ListQuery::default()
                 })
                 .unwrap()
         };

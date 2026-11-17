@@ -43,6 +43,7 @@ export interface ClipItem {
   useCount: number;
   createdAt: number;
   lastUsedAt: number;
+  group: string | null;
 }
 
 export type ListFilter = 'all' | 'text' | 'image' | 'files' | 'url' | 'favorite';
@@ -52,6 +53,10 @@ export interface ListQuery {
   filter: ListFilter;
   offset: number;
   limit: number;
+  sourceExe?: string | null;
+  since?: number | null;
+  until?: number | null;
+  group?: string | null;
 }
 
 export interface ListResult {
@@ -146,6 +151,9 @@ export type ErrorCode =
   | 'io'
   | 'db'
   | 'network'
+  | 'auth'
+  | 'crypto'
+  | 'too_large'
   | 'internal';
 
 export interface CmdError {
@@ -192,3 +200,8 @@ export const DEFAULT_SETTINGS: Settings = {
   respectPrivacyHints: true,
   skipSecrets: true,
 };
+
+export interface WebDavConnection { url: string; username: string; password: string }
+export interface BackupEntry { name: string; bytes: number | null }
+export interface RestoreResult { imported: number; skipped: number; settingsRestored: boolean | null }
+export type HistoryOptions = Pick<ListQuery, 'sourceExe' | 'since' | 'until' | 'group'>;

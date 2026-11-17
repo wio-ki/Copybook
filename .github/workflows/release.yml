@@ -28,6 +28,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - run: npm run test:ui
       - run: python -B -m unittest discover -s src-tauri/scripts -p test_validate_updater_release.py -v
       - uses: dtolnay/rust-toolchain@stable
         with:

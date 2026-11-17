@@ -6,11 +6,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const COLUMNS: &str="id,kind,sub_kind,substr(text,1,2000),text_length,line_count,html IS NOT NULL,rtf IS NOT NULL,image_json,paths_json,source_json,favorite,pinned,note,use_count,created_at,last_used_at";
+const COLUMNS: &str="id,kind,sub_kind,substr(text,1,2000),text_length,line_count,html IS NOT NULL,rtf IS NOT NULL,image_json,paths_json,source_json,favorite,pinned,note,use_count,created_at,last_used_at,group_name";
 
 pub struct Storage {
     conn: Connection,
     pub dir: PathBuf,
+    undo: Option<(Vec<i64>, i64)>,
 }
 pub struct StoredContent {
     pub item: ClipItem,
@@ -72,6 +73,7 @@ fn item_row(row: &Row<'_>) -> rusqlite::Result<ClipItem> {
         use_count: row.get(14)?,
         created_at: row.get(15)?,
         last_used_at: row.get(16)?,
+        group: row.get(17)?,
     })
 }
 impl Storage {
@@ -82,7 +84,7 @@ impl Storage {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         let version: u32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if version > 1 {
+        if version > 2 {
             return Err(CmdError::new(
                 "db",
                 "Database is newer than this application",
@@ -94,10 +96,20 @@ impl Storage {
             tx.pragma_update(None, "user_version", 1)?;
             tx.commit()?;
         }
-        Ok(Self {
+        if version < 2 {
+            let tx = conn.transaction()?;
+            tx.execute_batch(include_str!("../migrations/002_organize.sql"))?;
+            tx.pragma_update(None, "user_version", 2)?;
+            tx.commit()?;
+        }
+        let mut storage = Self {
             conn,
             dir: dir.to_owned(),
-        })
+            undo: None,
+        };
+        let abandoned = storage.ids("SELECT id FROM items WHERE deleted_at IS NOT NULL", [])?;
+        storage.delete(&abandoned)?;
+        Ok(storage)
     }
     pub fn ingest(&mut self, mut capture: Capture, settings: &Settings) -> Result<(i64, bool)> {
         if capture.kind == ClipKind::Files {
@@ -129,7 +141,7 @@ impl Storage {
             )
             .optional()?;
         if let Some(id) = existing {
-            self.conn.execute("UPDATE items SET html=?,rtf=?,source_json=?,last_used_at=?,use_count=use_count+1 WHERE id=?",params![capture.html,capture.rtf,source,now,id])?;
+            self.conn.execute("UPDATE items SET html=?,rtf=?,source_json=?,last_used_at=?,use_count=use_count+1,deleted_at=NULL WHERE id=?",params![capture.html,capture.rtf,source,now,id])?;
             self.cleanup(settings)?;
             return Ok((id, false));
         }
@@ -208,7 +220,7 @@ impl Storage {
     pub fn get(&self, id: i64) -> Result<ClipItem> {
         self.conn
             .query_row(
-                &format!("SELECT {COLUMNS} FROM items WHERE id=?"),
+                &format!("SELECT {COLUMNS} FROM items WHERE id=? AND deleted_at IS NULL"),
                 [id],
                 item_row,
             )
@@ -244,8 +256,8 @@ impl Storage {
     }
     pub fn mark(&self, id: i64, field: &str, value: bool) -> Result<ClipItem> {
         let sql = match field {
-            "favorite" => "UPDATE items SET favorite=? WHERE id=?",
-            "pinned" => "UPDATE items SET pinned=? WHERE id=?",
+            "favorite" => "UPDATE items SET favorite=?,group_name=CASE WHEN ?1 THEN group_name ELSE NULL END WHERE id=?2 AND deleted_at IS NULL",
+            "pinned" => "UPDATE items SET pinned=? WHERE id=? AND deleted_at IS NULL",
             _ => return Err(CmdError::internal()),
         };
         if self.conn.execute(sql, params![value, id])? == 0 {
@@ -254,6 +266,7 @@ impl Storage {
         self.get(id)
     }
     pub fn note(&self, id: i64, note: Option<String>) -> Result<ClipItem> {
+        self.get(id)?;
         let note = note.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
         if note.as_ref().is_some_and(|s| s.chars().count() > 500) {
             return Err(CmdError::invalid("Note exceeds 500 characters"));
@@ -285,6 +298,119 @@ impl Storage {
             params![move_to_top,now_ms(),id],
         )?;
         Ok(())
+    }
+    pub fn matching_ids(&self, query: &ListQuery) -> Result<Vec<i64>> {
+        let (clause, args) = search::clause(query);
+        let ids = self.ids(&format!("SELECT id FROM items WHERE {clause} ORDER BY pinned DESC,last_used_at DESC,id DESC LIMIT 100001"), params_from_iter(args))?;
+        if ids.len() > 100000 {
+            return Err(CmdError::new("too_large", "Too many matching records"));
+        }
+        Ok(ids)
+    }
+    pub fn soft_delete(&mut self, ids: &[i64]) -> Result<usize> {
+        validate_ids(ids, 100000)?;
+        if self.undo.is_some() {
+            let previous = self.ids("SELECT id FROM items WHERE deleted_at IS NOT NULL", [])?;
+            self.delete(&previous)?;
+            self.undo = None;
+        }
+        let deadline = now_ms() + 15000;
+        let tx = self.conn.transaction()?;
+        let mut removed = Vec::new();
+        for id in ids {
+            if tx.execute(
+                "UPDATE items SET deleted_at=? WHERE id=? AND deleted_at IS NULL",
+                params![deadline, id],
+            )? > 0
+            {
+                removed.push(*id);
+            }
+        }
+        tx.commit()?;
+        let count = removed.len();
+        if count > 0 {
+            self.undo = Some((removed, deadline));
+        }
+        Ok(count)
+    }
+    pub fn undo_delete(&mut self) -> Result<usize> {
+        let Some((ids, deadline)) = self.undo.take() else {
+            return Ok(0);
+        };
+        if now_ms() >= deadline {
+            self.purge_expired()?;
+            return Ok(0);
+        }
+        let tx = self.conn.transaction()?;
+        let mut count = 0;
+        for id in ids {
+            count += tx.execute(
+                "UPDATE items SET deleted_at=NULL WHERE id=? AND deleted_at=?",
+                params![id, deadline],
+            )?;
+        }
+        tx.commit()?;
+        Ok(count)
+    }
+    pub fn purge_expired(&mut self) -> Result<()> {
+        let ids = self.ids(
+            "SELECT id FROM items WHERE deleted_at IS NOT NULL AND deleted_at<=?",
+            [now_ms()],
+        )?;
+        self.delete(&ids)?;
+        Ok(())
+    }
+    pub fn merged_text(&self, ids: &[i64], separator: &str) -> Result<String> {
+        validate_ids(ids, 1000)?;
+        if separator.chars().count() > 100 {
+            return Err(CmdError::invalid("Separator exceeds 100 characters"));
+        }
+        let mut result = String::new();
+        for (index, id) in ids.iter().enumerate() {
+            let content = self.content(*id)?;
+            if content.item.kind != ClipKind::Text {
+                return Err(CmdError::invalid("Only text records can be merged"));
+            }
+            if result.len() + content.text.len() + separator.len() > 5_000_000 {
+                return Err(CmdError::new("too_large", "Merged text exceeds 5 MB"));
+            }
+            if index > 0 {
+                result.push_str(separator);
+            }
+            result.push_str(&content.text);
+        }
+        Ok(result)
+    }
+    pub fn groups(&self) -> Result<Vec<String>> {
+        Ok(self.conn.prepare("SELECT DISTINCT group_name FROM items WHERE group_name IS NOT NULL AND favorite=1 AND deleted_at IS NULL ORDER BY group_name COLLATE NOCASE")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+    }
+    pub fn set_group(&mut self, ids: &[i64], group: Option<String>) -> Result<usize> {
+        validate_ids(ids, 100000)?;
+        let group = group_name(group)?;
+        let tx = self.conn.transaction()?;
+        let mut count = 0;
+        for id in ids {
+            let found: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM items WHERE id=? AND deleted_at IS NULL)",
+                [id],
+                |r| r.get(0),
+            )?;
+            if !found {
+                return Err(CmdError::new("not_found", "Item does not exist"));
+            }
+            count += tx.execute("UPDATE items SET group_name=?,favorite=CASE WHEN ?1 IS NULL THEN favorite ELSE 1 END WHERE id=?2", params![group,id])?;
+        }
+        tx.commit()?;
+        Ok(count)
+    }
+    pub fn rename_group(&self, name: String, replacement: Option<String>) -> Result<usize> {
+        let name =
+            group_name(Some(name))?.ok_or_else(|| CmdError::invalid("Group name required"))?;
+        let replacement = group_name(replacement)?;
+        Ok(self.conn.execute(
+            "UPDATE items SET group_name=? WHERE group_name=?",
+            params![replacement, name],
+        )?)
     }
     pub fn delete(&mut self, ids: &[i64]) -> Result<usize> {
         let tx = self.conn.transaction()?;
@@ -327,32 +453,36 @@ impl Storage {
             .collect::<rusqlite::Result<_>>()?)
     }
     pub fn clear(&mut self, keep_marked: bool) -> Result<usize> {
+        let pending = self.ids("SELECT id FROM items WHERE deleted_at IS NOT NULL", [])?;
+        self.delete(&pending)?;
+        self.undo = None;
         let ids = self.ids(
             if keep_marked {
-                "SELECT id FROM items WHERE favorite=0 AND pinned=0"
+                "SELECT id FROM items WHERE favorite=0 AND pinned=0 AND deleted_at IS NULL"
             } else {
-                "SELECT id FROM items"
+                "SELECT id FROM items WHERE deleted_at IS NULL"
             },
             [],
         )?;
         self.delete(&ids)
     }
     pub fn cleanup(&mut self, s: &Settings) -> Result<usize> {
+        self.purge_expired()?;
         let mut ids = Vec::new();
         if s.retention_days > 0 {
             ids.extend(self.ids(
-                "SELECT id FROM items WHERE favorite=0 AND pinned=0 AND last_used_at<?",
+                "SELECT id FROM items WHERE favorite=0 AND pinned=0 AND deleted_at IS NULL AND last_used_at<?",
                 [now_ms() - i64::from(s.retention_days) * 86_400_000],
             )?);
         }
         if s.history_limit > 0 {
-            ids.extend(self.ids("SELECT id FROM items WHERE favorite=0 AND pinned=0 ORDER BY last_used_at DESC,id DESC LIMIT -1 OFFSET ?",[s.history_limit])?);
+            ids.extend(self.ids("SELECT id FROM items WHERE favorite=0 AND pinned=0 AND deleted_at IS NULL ORDER BY last_used_at DESC,id DESC LIMIT -1 OFFSET ?",[s.history_limit])?);
         }
         self.delete(&ids)
     }
     pub fn stats(&self) -> Result<Stats> {
         let size = |p: PathBuf| fs::metadata(p).map(|m| m.len()).unwrap_or(0);
-        let (total,text,image,files,favorite,pinned,marked)=self.conn.query_row("SELECT count(*),coalesce(sum(kind='text'),0),coalesce(sum(kind='image'),0),coalesce(sum(kind='files'),0),coalesce(sum(favorite),0),coalesce(sum(pinned),0),coalesce(sum(favorite OR pinned),0) FROM items",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?)))?;
+        let (total,text,image,files,favorite,pinned,marked)=self.conn.query_row("SELECT count(*),coalesce(sum(kind='text'),0),coalesce(sum(kind='image'),0),coalesce(sum(kind='files'),0),coalesce(sum(favorite),0),coalesce(sum(pinned),0),coalesce(sum(favorite OR pinned),0) FROM items WHERE deleted_at IS NULL",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?)))?;
         let image_bytes = fs::read_dir(self.dir.join("images"))?
             .filter_map(|e| e.ok())
             .map(|e| size(e.path()))
@@ -373,7 +503,7 @@ impl Storage {
         })
     }
     pub fn seen_apps(&self) -> Result<Vec<SeenApp>> {
-        let mut stmt=self.conn.prepare("SELECT source_json,count(*) AS n FROM items WHERE source_json IS NOT NULL GROUP BY json_extract(source_json,'$.exe') COLLATE NOCASE ORDER BY n DESC,json_extract(source_json,'$.exe')")?;
+        let mut stmt=self.conn.prepare("SELECT source_json,count(*) AS n FROM items WHERE source_json IS NOT NULL AND deleted_at IS NULL GROUP BY json_extract(source_json,'$.exe') COLLATE NOCASE ORDER BY n DESC,json_extract(source_json,'$.exe')")?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
         let mut out = Vec::new();
         for row in rows {
@@ -386,6 +516,136 @@ impl Storage {
         }
         Ok(out)
     }
+
+    pub fn restore_records(
+        &mut self,
+        records: Vec<crate::backup::PreparedRecord>,
+    ) -> Result<crate::backup::RestoreResult> {
+        let tx = self.conn.transaction()?;
+        let mut written = Vec::new();
+        let result = (|| -> Result<crate::backup::RestoreResult> {
+            let mut imported = 0;
+            let mut skipped = 0;
+            for prepared in records {
+                let r = prepared.record;
+                let text = if r.kind == ClipKind::Files {
+                    r.paths.join("\n")
+                } else {
+                    r.text
+                };
+                let mut hash = Sha256::new();
+                if let Some(pixels) = &prepared.pixels {
+                    hash.update(pixels.width().to_le_bytes());
+                    hash.update(pixels.height().to_le_bytes());
+                    hash.update(pixels.as_raw());
+                } else {
+                    hash.update(text.as_bytes());
+                }
+                let hash = hash.finalize().to_vec();
+                let exists: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM items WHERE kind=? AND hash=?)",
+                    params![r.kind.as_str(), hash],
+                    |row| row.get(0),
+                )?;
+                if exists {
+                    skipped += 1;
+                    continue;
+                }
+                let sub = if r.kind == ClipKind::Text {
+                    detect::sub_kind(&text)
+                } else {
+                    None
+                };
+                let source = r.source.as_ref().map(json).transpose()?;
+                let paths = if r.kind == ClipKind::Files {
+                    Some(json(&r.paths)?)
+                } else {
+                    None
+                };
+                let search = format!(
+                    "{}\n{}",
+                    text.to_lowercase(),
+                    r.note.as_deref().unwrap_or("").to_lowercase()
+                );
+                tx.execute("INSERT INTO items(kind,hash,sub_kind,text,text_length,line_count,html,rtf,paths_json,source_json,favorite,pinned,note,group_name,use_count,created_at,last_used_at,search_text) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    params![r.kind.as_str(),hash,sub,text,text.chars().count() as u32,if text.is_empty(){0}else{text.split('\n').count() as u32},r.html,prepared.rtf,paths,source,r.favorite||r.group.is_some(),r.pinned,r.note,r.group,r.use_count,r.created_at,r.last_used_at,search])?;
+                if let Some(pixels) = prepared.pixels {
+                    let id = tx.last_insert_rowid();
+                    let path = self.dir.join("images").join(format!("{id}.png"));
+                    let thumb = self.dir.join("images").join(format!("{id}.thumb.png"));
+                    written.extend([path.clone(), thumb.clone()]);
+                    pixels
+                        .save(&path)
+                        .map_err(|_| CmdError::new("io", "Image restore failed"))?;
+                    image::DynamicImage::ImageRgba8(pixels.clone())
+                        .thumbnail(480, 480)
+                        .save(&thumb)
+                        .map_err(|_| CmdError::new("io", "Thumbnail restore failed"))?;
+                    let info = ImageInfo {
+                        path: path.to_string_lossy().into_owned(),
+                        thumb: thumb.to_string_lossy().into_owned(),
+                        width: pixels.width(),
+                        height: pixels.height(),
+                        bytes: fs::metadata(&path)?.len(),
+                    };
+                    tx.execute(
+                        "UPDATE items SET image_json=? WHERE id=?",
+                        params![json(&info)?, id],
+                    )?;
+                }
+                imported += 1;
+            }
+            Ok(crate::backup::RestoreResult {
+                imported,
+                skipped,
+                settings_restored: None,
+            })
+        })();
+        match result {
+            Ok(result) => match tx.commit() {
+                Ok(()) => Ok(result),
+                Err(e) => {
+                    for path in written {
+                        let _ = fs::remove_file(path);
+                    }
+                    Err(e.into())
+                }
+            },
+            Err(e) => {
+                drop(tx);
+                for path in written {
+                    let _ = fs::remove_file(path);
+                }
+                Err(e)
+            }
+        }
+    }
+}
+
+pub fn validate_ids(ids: &[i64], max: usize) -> Result<()> {
+    let unique: std::collections::HashSet<_> = ids.iter().collect();
+    if ids.is_empty()
+        || ids.len() > max
+        || ids.iter().any(|id| *id <= 0)
+        || unique.len() != ids.len()
+    {
+        return Err(CmdError::invalid(
+            "Expected distinct positive item IDs within the operation limit",
+        ));
+    }
+    Ok(())
+}
+pub fn group_name(group: Option<String>) -> Result<Option<String>> {
+    let group = group.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
+    if group
+        .as_ref()
+        .is_some_and(|s| s.chars().count() > 40 || s.chars().any(char::is_control))
+    {
+        return Err(CmdError::invalid(
+            "Group must have at most 40 characters without control characters",
+        ));
+    }
+    Ok(group)
 }
 
 #[cfg(test)]
@@ -406,7 +666,157 @@ mod tests {
             filter,
             offset,
             limit,
+            ..ListQuery::default()
         }
+    }
+    #[test]
+    fn batch_undo_filters_groups_and_full_text_merge() {
+        let (_dir, mut db, s) = setup();
+        let full = format!("{}尾部", "完整文字".repeat(800));
+        let mut capture = Capture::text(&full);
+        capture.source = Some(SourceApp {
+            name: "Editor".into(),
+            exe: "Code.exe".into(),
+            icon: None,
+        });
+        let (a, _) = db.ingest(capture, &s).unwrap();
+        let (b, _) = db.ingest(Capture::text("第二条"), &s).unwrap();
+        db.set_group(&[a, b], Some("工作".into())).unwrap();
+        db.note(a, Some("备注".into())).unwrap();
+        assert_eq!(
+            db.merged_text(&[b, a], "\n").unwrap(),
+            format!("第二条\n{full}")
+        );
+        assert!(db.merged_text(&[a, a], " ").is_err());
+        let mut q = query("", ListFilter::All, 0, 1);
+        q.group = Some("工作".into());
+        q.source_exe = Some("code.EXE".into());
+        q.since = Some(0);
+        q.until = Some(now_ms() + 1000);
+        assert_eq!(db.matching_ids(&q).unwrap(), vec![a]);
+        q.until = Some(0);
+        assert_eq!(db.list(q).unwrap().total, 0);
+        assert_eq!(db.soft_delete(&[a, b]).unwrap(), 2);
+        assert_eq!(db.stats().unwrap().total, 0);
+        assert!(db.get(a).is_err());
+        assert!(db.content(a).is_err());
+        assert!(db.groups().unwrap().is_empty());
+        assert!(db.seen_apps().unwrap().is_empty());
+        assert_eq!(db.undo_delete().unwrap(), 2);
+        assert_eq!(db.get(a).unwrap().group.as_deref(), Some("工作"));
+        assert_eq!(db.get(a).unwrap().note.as_deref(), Some("备注"));
+        db.rename_group("工作".into(), Some("项目".into())).unwrap();
+        assert_eq!(db.groups().unwrap(), vec!["项目"]);
+        db.mark(a, "favorite", false).unwrap();
+        assert!(db.get(a).unwrap().group.is_none());
+    }
+    #[test]
+    fn image_undo_expiry_recapture_and_restart() {
+        let (dir, mut db, s) = setup();
+        let mut capture = Capture::text("");
+        capture.kind = ClipKind::Image;
+        capture.pixels = Some(image::RgbaImage::new(2, 2));
+        let (id, _) = db.ingest(capture.clone(), &s).unwrap();
+        let path = db.get(id).unwrap().image.unwrap().path;
+        db.soft_delete(&[id]).unwrap();
+        assert!(Path::new(&path).exists());
+        assert!(db.merged_text(&[id], " ").is_err());
+        assert_eq!(db.undo_delete().unwrap(), 1);
+        assert!(Path::new(&path).exists());
+        db.soft_delete(&[id]).unwrap();
+        db.ingest(capture, &s).unwrap();
+        assert_eq!(db.undo_delete().unwrap(), 0);
+        assert!(db.get(id).is_ok());
+        db.soft_delete(&[id]).unwrap();
+        db.conn
+            .execute("UPDATE items SET deleted_at=0 WHERE id=?", [id])
+            .unwrap();
+        db.undo.as_mut().unwrap().1 = 0;
+        assert_eq!(db.undo_delete().unwrap(), 0);
+        assert!(!Path::new(&path).exists());
+        let (id, _) = db.ingest(Capture::text("pending"), &s).unwrap();
+        db.soft_delete(&[id]).unwrap();
+        drop(db);
+        let db = Storage::open(dir.path()).unwrap();
+        assert_eq!(db.stats().unwrap().total, 0);
+    }
+    #[test]
+    fn migrate_v1_and_portable_backup_merge() {
+        let old = tempfile::tempdir_in(crate::test_dir()).unwrap();
+        let conn = Connection::open(old.path().join("copybook.db")).unwrap();
+        conn.execute_batch(include_str!("../migrations/001_initial.sql"))
+            .unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        drop(conn);
+        let mut original = Storage::open(old.path()).unwrap();
+        let s = Settings {
+            history_limit: 0,
+            ..Settings::default()
+        };
+        let (a, _) = original.ingest(Capture::text("portable text"), &s).unwrap();
+        original.set_group(&[a], Some("Group".into())).unwrap();
+        original.note(a, Some("note".into())).unwrap();
+        let mut image = Capture::text("");
+        image.kind = ClipKind::Image;
+        image.pixels = Some(image::RgbaImage::new(3, 4));
+        original.ingest(image, &s).unwrap();
+        let archive = crate::backup::snapshot(&original, s.clone()).unwrap();
+        let bytes = crate::backup::encrypt(&archive, "test password").unwrap();
+        let archive = crate::backup::decrypt(&bytes, "test password").unwrap();
+        let (new_dir, mut restored, _) = setup();
+        let result = restored
+            .restore_records(crate::backup::prepare(archive.records).unwrap())
+            .unwrap();
+        assert_eq!(result.imported, 2);
+        let result = restored
+            .restore_records(
+                crate::backup::prepare(crate::backup::snapshot(&original, s).unwrap().records)
+                    .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(result.skipped, 2);
+        assert_eq!(result.imported, 0);
+        let result = restored.list(query("", ListFilter::All, 0, 50)).unwrap();
+        let image = result
+            .items
+            .iter()
+            .find(|i| i.kind == ClipKind::Image)
+            .unwrap()
+            .image
+            .as_ref()
+            .unwrap();
+        assert!(Path::new(&image.path).starts_with(new_dir.path()));
+        assert_eq!(image::open(&image.path).unwrap().width(), 3);
+        assert_eq!(restored.groups().unwrap(), vec!["Group"]);
+        assert_eq!(
+            result
+                .items
+                .iter()
+                .find(|i| i.kind == ClipKind::Text)
+                .unwrap()
+                .note
+                .as_deref(),
+            Some("note")
+        );
+    }
+    #[test]
+    fn restore_rolls_back_all_new_rows_when_an_image_cannot_be_written() {
+        let (_dir, mut source, s) = setup();
+        let mut image = Capture::text("");
+        image.kind = ClipKind::Image;
+        image.pixels = Some(image::RgbaImage::new(2, 2));
+        source.ingest(image, &s).unwrap();
+        source
+            .ingest(Capture::text("first record must roll back"), &s)
+            .unwrap();
+        let records =
+            crate::backup::prepare(crate::backup::snapshot(&source, s).unwrap().records).unwrap();
+        let (target_dir, mut target, _) = setup();
+        // The text record sorts first; force the following image write to fail.
+        fs::create_dir(target_dir.path().join("images/2.png")).unwrap();
+        assert!(target.restore_records(records).is_err());
+        assert_eq!(target.stats().unwrap().total, 0);
+        assert!(!target_dir.path().join("images/2.thumb.png").exists());
     }
     #[test]
     fn dedupe_marks_content_and_deletion() {

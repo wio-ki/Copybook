@@ -19,6 +19,7 @@ import type { AppInfo, SeenApp, Settings, SettingsSection, Stats, UpdateInfo, Up
 import { formatBytes, formatNumber } from '../shared/format';
 import { Seal } from '../shared/Seal';
 import { Toast, useToast } from '../shared/Toast';
+import { WebDavBackup } from './WebDavBackup';
 import { Group, HotkeyRecorder, Row, Segmented, Select, Switch } from './controls';
 
 const SECTIONS: { id: SettingsSection; icon: typeof Info }[] = [
@@ -525,6 +526,7 @@ function Data() {
         </dl>
       </Group>
 
+      <WebDavBackup />
       <Group title={d.location}>
         <div className="srow">
           <div className="srow-text">

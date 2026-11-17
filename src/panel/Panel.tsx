@@ -18,7 +18,7 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api, toCmdError } from '../shared/api';
 import { useApp } from '../shared/app';
-import type { ClipItem, ListFilter } from '../shared/contract';
+import type { ClipItem, ListFilter, HistoryOptions } from '../shared/contract';
 import { formatNumber } from '../shared/format';
 import { hotkeyParts } from '../shared/hotkey';
 import { Toast, useToast } from '../shared/Toast';
@@ -27,6 +27,7 @@ import { ContextMenu, type MenuEntry } from './ContextMenu';
 import { Detail } from './Detail';
 import { EmptyState } from './EmptyState';
 import { useHistory } from './useHistory';
+import { useOrganizer } from './Organizer';
 
 const FILTERS: ListFilter[] = ['all', 'text', 'image', 'files', 'url', 'favorite'];
 
@@ -40,7 +41,8 @@ export function Panel() {
   const { settings, t, lang } = useApp();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ListFilter>('all');
-  const { items, total, status, refresh, loadMore, patch } = useHistory(query, filter);
+  const [options, setOptions] = useState<HistoryOptions>({});
+  const { items, total, status, refresh, loadMore, patch } = useHistory(query, filter, options);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -60,6 +62,7 @@ export function Panel() {
   const selected: ClipItem | undefined = items[index];
   const detail = detailId == null ? null : (items.find((i) => i.id === detailId) ?? null);
 
+  const organizer = useOrganizer({ items, query, filter, options, setOptions, focusId: selected?.id ?? null, setFocus: setSelectedId, refresh, notify: showToast });
   const focusSearch = useCallback(() => inputRef.current?.focus(), []);
   const errorText = useCallback((e: unknown) => t.errors[toCmdError(e).code] ?? t.toast.failed, [t]);
 
@@ -183,21 +186,10 @@ export function Panel() {
     [showToast, t, errorText],
   );
 
-  const remove = useCallback(
-    async (item: ClipItem) => {
-      const at = items.findIndex((i) => i.id === item.id);
-      const next = items[at + 1] ?? items[at - 1];
-      setSelectedId(next?.id ?? null);
-      if (detailId === item.id) setDetailId(null);
-      try {
-        await api.deleteItems([item.id]);
-        showToast(t.toast.deleted);
-      } catch (e) {
-        showToast(errorText(e));
-      }
-    },
-    [items, detailId, showToast, t, errorText],
-  );
+  const remove = (item: ClipItem) => {
+    setDetailId(null);
+    organizer.requestDelete([item.id], item.favorite || item.pinned);
+  };
 
   const saveNote = useCallback(
     async (item: ClipItem, note: string | null) => {
@@ -307,6 +299,8 @@ export function Panel() {
   const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
   onKey.current = (e: KeyboardEvent) => {
     if (e.isComposing || e.keyCode === 229 || menu || clearing) return;
+    if (organizer.onKey(e)) return;
+    if ((e.target as HTMLElement | null)?.closest('.organizer-tools, .selection-bar, .advanced-filters, .undo-bar')) return;
     const mod = e.ctrlKey || e.metaKey;
     const target = e.target as HTMLElement | null;
     const inTextarea = target?.tagName === 'TEXTAREA';
@@ -464,6 +458,7 @@ export function Panel() {
       keys: ['Ctrl+P'],
       run: () => void togglePin(item),
     });
+    entries.push({ id: 'group', label: lang === 'zh-CN' ? '设置收藏分组' : 'Set favorite group', icon: FolderOpen, run: () => organizer.open('group', [item.id]) });
     entries.push({ id: 'detail', label: t.actions.detail, icon: Info, keys: ['Alt+↵'], run: () => setDetailId(item.id) });
     if (item.subKind === 'url') {
       const url = /^[a-z][a-z0-9+.-]*:/i.test(item.text.trim()) ? item.text.trim() : `https://${item.text.trim()}`;
@@ -495,8 +490,8 @@ export function Panel() {
     setMenu(null);
     focusSearch();
   }, [focusSearch]);
-  const selectRow = useCallback((id: number) => setSelectedId(id), []);
-  const pasteRow = useCallback((item: ClipItem) => void paste(item), [paste]);
+  const selectRow = (id: number, e?: React.MouseEvent) => organizer.select(id, e);
+  const pasteRow = (item: ClipItem) => { if (!organizer.mode) void paste(item); };
   const favoriteRow = useCallback((item: ClipItem) => void toggleFavorite(item), [toggleFavorite]);
 
   // ---- render ---------------------------------------------------------------------------
@@ -633,14 +628,17 @@ export function Panel() {
         ))}
       </nav>
 
+      {organizer.controls}
       <div className="panel-body">
-        <div ref={listRef} id="clip-list" className="list" role="listbox" aria-label={t.filters[filter]}>
+        <div ref={listRef} id="clip-list" className="list" role="listbox" tabIndex={0} aria-multiselectable={organizer.mode} aria-label={t.filters[filter]}>
           {items.map((item, i) => (
             <ClipRow
               key={item.id}
               item={item}
               index={i}
-              selected={i === index}
+              selected={organizer.mode ? organizer.ids.includes(item.id) : i === index}
+              multi={organizer.mode}
+              focused={i === index}
               density={settings.density}
               showSource={settings.showSource}
               t={t}
@@ -681,7 +679,7 @@ export function Panel() {
       </div>
 
       <footer className="panel-foot" data-tauri-drag-region>
-        <span className="hints" data-tauri-drag-region>
+        {organizer.mode ? <span className="hints"><kbd className="kbd">Ctrl+A</kbd><span>{lang==='zh-CN'?'全选':'All'}</span><kbd className="kbd">Ctrl+Del</kbd><span>{t.actions.delete}</span><kbd className="kbd">Esc</kbd><span>{lang==='zh-CN'?'退出':'Exit'}</span></span> : <span className="hints" data-tauri-drag-region>
           <kbd className="kbd">↵</kbd>
           <span>{plainDefault ? t.panel.hintPlain : t.panel.hintPaste}</span>
           {detail ? (
@@ -697,7 +695,7 @@ export function Panel() {
               <span>{t.panel.hintDetail}</span>
             </>
           )}
-        </span>
+        </span>}
         {paused ? (
           <button type="button" className="paused" onClick={() => void api.setCapturePaused(false)} title={t.panel.resume}>
             <span className="paused-dot" aria-hidden="true" />
@@ -711,6 +709,7 @@ export function Panel() {
         )}
       </footer>
 
+      {organizer.dialogs}
       {menu && <ContextMenu x={menu.x} y={menu.y} entries={menuEntries(menu.item)} onClose={closeMenu} />}
     </div>
   );

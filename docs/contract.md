@@ -1,4 +1,62 @@
-# Copybook — frontend/backend contract (v1)
+# Copybook — frontend/backend contract (v1.4)
+
+## v1.4 additions (take precedence over the v1 descriptions below)
+
+* `ClipItem.group: string | null`: optional favorite group (1..40 trimmed characters).
+  Assigning a group also favorites the item; unfavoriting clears its group. Groups are
+  names stored on items; renaming/deleting a group updates its members atomically.
+* `ListQuery` additionally accepts optional nullable `sourceExe`, `since`, `until`, `group`.
+  Source matches an exact executable name ignoring case. Time filters apply to `lastUsedAt`,
+  with inclusive `since` and exclusive `until` (Unix milliseconds). Empty group means
+  ungrouped favorites. All filters combine with AND and apply before pagination.
+* `list_item_ids({ query }) -> number[]` returns ALL matching IDs in list order, bounded
+  to 100000. The UI labels select-all as the complete current search/filter result;
+  selection is a fixed ID snapshot, cleared when filters change.
+* `delete_items({ ids }) -> number` now hides a batch for 15 seconds; `undo_delete({}) ->
+  number` restores the latest batch, including original image files and metadata. A new
+  deletion finalizes the previous batch. `clear_history` and retention cleanup remain
+  permanent. Tombstones are purged after expiry and on application start. Recapturing a
+  hidden item revives it without duplication. Hidden items cannot be read/copied/backed up.
+* `get_merged_text({ ids, separator }) -> string` and `copy_merged({ ids, separator }) ->
+  void` accept 1..1000 distinct, existing text items, preserve requested order, use FULL
+  text (never list previews), and cap the result at 5 MB UTF-8, separator at 100 chars.
+  The UI previews before copying; images/files are rejected rather than silently omitted.
+* `list_groups({}) -> string[]`, `set_item_group({ ids, group }) -> number`,
+  `rename_group({ name, replacement }) -> number` (null replacement ungroups members,
+  preserves favorite); names are trimmed and limited to 40 characters.
+* WebDAV commands: `webdav_test({ connection }) -> void`,
+  `webdav_list({ connection }) -> BackupEntry[]`,
+  `webdav_backup({ connection, password }) -> BackupEntry`,
+  `webdav_restore({ connection, name, password, restoreSettings }) -> RestoreResult`.
+  Connection = `{ url, username, password }`; no credentials or encryption passwords are
+  persisted, backed up, returned or logged. The UI may remember URL/username only locally.
+  HTTPS is mandatory except HTTP on loopback for local servers/tests. TLS is validated,
+  redirects disabled; all requests stay in the configured collection. The collection must
+  already exist. Backups have an opaque timestamp/random `.cpbk` filename.
+* BackupEntry = `{ name: string, bytes: number | null }`.
+  RestoreResult = `{ imported: number, skipped: number, settingsRestored: boolean | null }`.
+  Null means preference restore was not requested; false reports that records imported but
+  applying preferences failed (the UI must say so). Restore merges; existing content
+  wins (no overwrite), all new entries commit atomically. Images are embedded portably;
+  file entries back up references, not the referenced files. Source icons are omitted.
+  Schema version, format, sizes and image dimensions are validated before import; a wrong
+  password or corrupt backup changes nothing. Limit: 256 MiB decrypted JSON, 100000 records.
+* Backup format v1: `CPBK0001` + 16 random salt bytes + 12 random nonce bytes + AES-256-GCM
+  ciphertext/tag. Header is authenticated AAD. Argon2id v1.3 derives a 32-byte key with
+  65536 KiB memory, 3 iterations, parallelism 1; plaintext is gzip-compressed JSON. Password
+  length 8..1024 UTF-8 bytes. Every backup uses independent OS randomness. Encryption is
+  always on. Password loss cannot be recovered. Cloud sees ciphertext, file size and name.
+  Optional settings restore applies validated appearance/capture/paste/data preferences,
+  preserving this machine's hotkey, Win+V, autostart and elevation choices.
+* New error codes: `auth` (WebDAV authentication), `crypto` (wrong password or tampering),
+  `too_large` (size/item limits). Errors never contain URL credentials or server response
+  bodies. Backend history changes continue to use `updated`/`deleted`/`added` reasons.
+* Panel multi-select: explicit checkbox mode, Ctrl+click toggle, Shift+click range,
+  Shift+arrow extend, Space toggle focused item, Ctrl+A select all matching results;
+  Ctrl+A in a text input selects text except in explicit multi-select mode. Escape exits
+  dialogs first, then multi-select. Single/double click cannot paste in multi-select mode.
+  Marked-item deletion asks for confirmation; UI undo action lasts 15 seconds.
+
 
 This file is the single source of truth between the web frontend (`src/`, written by Claude)
 and the Rust backend (`src-tauri/`, written by Codex). Any change to a name, payload or
@@ -14,7 +72,7 @@ Windows 10/11 only. No macOS or Linux code paths.
 | --- | --- |
 | productName | `Copybook` |
 | identifier | `io.github.wio-ki.copybook` |
-| version | `1.3.0` (single source: `package.json`, `tauri.conf.json` reads it) |
+| version | `1.4.0` (single source: `package.json`, `tauri.conf.json` reads it) |
 | data dir | Tauri `app_data_dir()` = `%APPDATA%\io.github.wio-ki.copybook\` |
 | database | `<data>\copybook.db` (SQLite, WAL) |
 | settings | `<data>\settings.json` |

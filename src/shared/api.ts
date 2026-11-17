@@ -1,6 +1,6 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import type {
-  AppInfo,
+  AppInfo, BackupEntry, RestoreResult, WebDavConnection,
   ClipItem,
   CmdError,
   ErrorCode,
@@ -28,6 +28,17 @@ export interface Backend {
   setPinned(id: number, value: boolean): Promise<ClipItem>;
   setNote(id: number, note: string | null): Promise<ClipItem>;
   deleteItems(ids: number[]): Promise<number>;
+  listItemIds(query: ListQuery): Promise<number[]>;
+  undoDelete(): Promise<number>;
+  getMergedText(ids: number[], separator: string): Promise<string>;
+  copyMerged(ids: number[], separator: string): Promise<void>;
+  listGroups(): Promise<string[]>;
+  setItemGroup(ids: number[], group: string | null): Promise<number>;
+  renameGroup(name: string, replacement: string | null): Promise<number>;
+  webdavTest(connection: WebDavConnection): Promise<void>;
+  webdavList(connection: WebDavConnection): Promise<BackupEntry[]>;
+  webdavBackup(connection: WebDavConnection, password: string): Promise<BackupEntry>;
+  webdavRestore(connection: WebDavConnection, name: string, password: string, restoreSettings: boolean): Promise<RestoreResult>;
   clearHistory(keepMarked: boolean): Promise<number>;
   getStats(): Promise<Stats>;
   listSeenApps(): Promise<SeenApp[]>;
@@ -64,6 +75,7 @@ const ERROR_CODES: readonly ErrorCode[] = [
   'io',
   'db',
   'network',
+  'auth', 'crypto', 'too_large',
   'internal',
 ];
 
@@ -99,6 +111,17 @@ async function createTauriBackend(): Promise<Backend> {
     setPinned: (id, value) => call('set_pinned', { id, value }),
     setNote: (id, note) => call('set_note', { id, note }),
     deleteItems: (ids) => call('delete_items', { ids }),
+    listItemIds: (query) => call('list_item_ids', { query }),
+    undoDelete: () => call('undo_delete'),
+    getMergedText: (ids, separator) => call('get_merged_text', { ids, separator }),
+    copyMerged: (ids, separator) => call('copy_merged', { ids, separator }),
+    listGroups: () => call('list_groups'),
+    setItemGroup: (ids, group) => call('set_item_group', { ids, group }),
+    renameGroup: (name, replacement) => call('rename_group', { name, replacement }),
+    webdavTest: (connection) => call('webdav_test', { connection }),
+    webdavList: (connection) => call('webdav_list', { connection }),
+    webdavBackup: (connection, password) => call('webdav_backup', { connection, password }),
+    webdavRestore: (connection, name, password, restoreSettings) => call('webdav_restore', { connection, name, password, restoreSettings }),
     clearHistory: (keepMarked) => call('clear_history', { keepMarked }),
     getStats: () => call('get_stats'),
     listSeenApps: () => call('list_seen_apps'),

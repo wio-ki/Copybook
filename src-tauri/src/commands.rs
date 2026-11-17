@@ -71,11 +71,148 @@ pub async fn set_note(app: AppHandle, id: i64, note: Option<String>) -> Result<C
 #[tauri::command]
 pub async fn delete_items(app: AppHandle, ids: Vec<i64>) -> Result<usize> {
     blocking(app, move |a| {
-        let count = a.state::<AppState>().db(|db| db.delete(&ids))?;
+        let count = a.state::<AppState>().db(|db| db.soft_delete(&ids))?;
         if count > 0 {
             shell::changed(a, "deleted", None);
+            let app = a.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                let _ = tauri::async_runtime::spawn_blocking(move || {
+                    if let Err(error) = app.state::<AppState>().db(|db| db.purge_expired()) {
+                        log::warn!("Deletion cleanup failed: {}", error.code);
+                    }
+                })
+                .await;
+            });
         }
         Ok(count)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn list_item_ids(app: AppHandle, query: ListQuery) -> Result<Vec<i64>> {
+    blocking(app, move |a| {
+        a.state::<AppState>().db(|db| db.matching_ids(&query))
+    })
+    .await
+}
+#[tauri::command]
+pub async fn undo_delete(app: AppHandle) -> Result<usize> {
+    blocking(app, |a| {
+        let count = a.state::<AppState>().db(|db| db.undo_delete())?;
+        if count > 0 {
+            shell::changed(a, "added", None);
+        }
+        Ok(count)
+    })
+    .await
+}
+#[tauri::command]
+pub async fn get_merged_text(app: AppHandle, ids: Vec<i64>, separator: String) -> Result<String> {
+    blocking(app, move |a| {
+        a.state::<AppState>()
+            .db(|db| db.merged_text(&ids, &separator))
+    })
+    .await
+}
+#[tauri::command]
+pub async fn copy_merged(app: AppHandle, ids: Vec<i64>, separator: String) -> Result<()> {
+    blocking(app, move |a| crate::paste::copy_merged(a, &ids, &separator)).await
+}
+#[tauri::command]
+pub async fn list_groups(app: AppHandle) -> Result<Vec<String>> {
+    blocking(app, |a| a.state::<AppState>().db(|db| db.groups())).await
+}
+#[tauri::command]
+pub async fn set_item_group(app: AppHandle, ids: Vec<i64>, group: Option<String>) -> Result<usize> {
+    blocking(app, move |a| {
+        let count = a.state::<AppState>().db(|db| db.set_group(&ids, group))?;
+        shell::changed(a, "updated", None);
+        Ok(count)
+    })
+    .await
+}
+#[tauri::command]
+pub async fn rename_group(
+    app: AppHandle,
+    name: String,
+    replacement: Option<String>,
+) -> Result<usize> {
+    blocking(app, move |a| {
+        let count = a
+            .state::<AppState>()
+            .db(|db| db.rename_group(name, replacement))?;
+        shell::changed(a, "updated", None);
+        Ok(count)
+    })
+    .await
+}
+#[tauri::command]
+pub async fn webdav_test(app: AppHandle, connection: crate::backup::Connection) -> Result<()> {
+    blocking(app, move |_| crate::backup::list(&connection).map(|_| ())).await
+}
+#[tauri::command]
+pub async fn webdav_list(
+    app: AppHandle,
+    connection: crate::backup::Connection,
+) -> Result<Vec<crate::backup::BackupEntry>> {
+    blocking(app, move |_| crate::backup::list(&connection)).await
+}
+#[tauri::command]
+pub async fn webdav_backup(
+    app: AppHandle,
+    connection: crate::backup::Connection,
+    password: String,
+) -> Result<crate::backup::BackupEntry> {
+    let password = zeroize::Zeroizing::new(password);
+    blocking(app, move |a| {
+        let _gate = crate::backup::GATE
+            .try_lock()
+            .map_err(|_| CmdError::invalid("A backup or restore is already running"))?;
+        let state = a.state::<AppState>();
+        let settings = state.settings()?;
+        let archive = state.db(|db| crate::backup::snapshot(db, settings))?;
+        crate::backup::upload(&connection, &archive, &password)
+    })
+    .await
+}
+#[tauri::command]
+pub async fn webdav_restore(
+    app: AppHandle,
+    connection: crate::backup::Connection,
+    name: String,
+    password: String,
+    restore_settings: bool,
+) -> Result<crate::backup::RestoreResult> {
+    let password = zeroize::Zeroizing::new(password);
+    blocking(app, move |a| {
+        let _gate = crate::backup::GATE
+            .try_lock()
+            .map_err(|_| CmdError::invalid("A backup or restore is already running"))?;
+        let archive = crate::backup::download(&connection, &name, &password)?;
+        let records = crate::backup::prepare(archive.records)?;
+        let mut patch = serde_json::to_value(archive.settings).map_err(|_| CmdError::internal())?;
+        let map = patch.as_object_mut().ok_or_else(CmdError::internal)?;
+        for key in ["hotkey", "autostart", "runAsAdmin", "winV"] {
+            map.remove(key);
+        }
+        a.state::<AppState>().settings()?.patch(patch.clone())?;
+        let mut result = a.state::<AppState>().db(|db| db.restore_records(records))?;
+        shell::changed(a, "added", None);
+        if restore_settings {
+            result.settings_restored = Some(match shell::update(a, patch) {
+                Ok(_) => true,
+                Err(error) => {
+                    log::warn!(
+                        "Records restored but preferences could not be applied: {}",
+                        error.code
+                    );
+                    false
+                }
+            });
+        }
+        Ok(result)
     })
     .await
 }

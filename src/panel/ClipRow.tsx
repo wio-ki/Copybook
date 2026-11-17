@@ -19,12 +19,14 @@ interface RowProps {
   item: ClipItem;
   index: number;
   selected: boolean;
+  multi?: boolean;
+  focused?: boolean;
   density: Density;
   showSource: boolean;
   t: Strings;
   lang: Lang;
   now: number;
-  onSelect: (id: number) => void;
+  onSelect: (id: number, e?: MouseEvent) => void;
   onPaste: (item: ClipItem) => void;
   onMenu: (item: ClipItem, x: number, y: number) => void;
   onToggleFavorite: (item: ClipItem) => void;
@@ -54,14 +56,14 @@ export const ClipRow = memo(function ClipRow(props: RowProps) {
       role="option"
       aria-selected={selected}
       data-index={index}
-      className={`row row--${item.kind}${compact ? ' row--compact' : ''}${selected ? ' is-selected' : ''}`}
+      className={`row row--${item.kind}${compact ? ' row--compact' : ''}${selected ? ' is-selected' : ''}${props.multi ? ' row--multi' : ''}${props.multi && props.focused ? ' is-focused' : ''}`}
       onMouseDown={keepFocus}
-      onClick={() => props.onSelect(item.id)}
-      onDoubleClick={() => props.onPaste(item)}
+      onClick={(e) => props.onSelect(item.id,e)}
+      onDoubleClick={() => { if (!props.multi) props.onPaste(item); }}
       onContextMenu={openMenu}
     >
       <span className="stamp tnum" aria-hidden="true">
-        {index < 9 ? index + 1 : ''}
+        {props.multi ? (selected ? '✓' : '□') : index < 9 ? index + 1 : ''}
       </span>
 
       <div className="row-body">
@@ -71,6 +73,7 @@ export const ClipRow = memo(function ClipRow(props: RowProps) {
             <span>{item.note}</span>
           </p>
         )}
+        {item.group && <span className="row-group">{item.group}</span>}
         <Content item={item} compact={compact} t={t} />
         {!compact && <Meta item={item} showSource={showSource} t={t} lang={lang} now={now} />}
       </div>

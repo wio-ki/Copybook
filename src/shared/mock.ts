@@ -97,6 +97,7 @@ function text(
     favorite: false,
     pinned: false,
     note: null,
+    group: null,
     useCount: 1,
     createdAt: now - ago - 3 * day,
     lastUsedAt: now - ago,
@@ -203,6 +204,7 @@ export function createMockBackend(): Backend {
     ...(params.has('plain') ? { pastePlain: true } : {}),
     ...(params.get('source') === '0' ? { showSource: false } : {}),
   };
+  let undo: { items: ClipItem[]; deadline: number } | null = null;
   let paused = params.has('paused');
   let elevated = params.get('admin') === '1';
   const updateMode = params.get('update');
@@ -247,6 +249,10 @@ export function createMockBackend(): Backend {
         if (!item.favorite) return false;
         break;
     }
+    if (q.sourceExe && item.source?.exe.toLowerCase() !== q.sourceExe.toLowerCase()) return false;
+    if (q.since != null && item.lastUsedAt < q.since) return false;
+    if (q.until != null && item.lastUsedAt >= q.until) return false;
+    if (q.group != null && (!item.favorite || (item.group ?? '') !== q.group)) return false;
     const terms = q.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const hay = `${item.text}\n${item.note ?? ''}`.toLowerCase();
     return terms.every((t) => hay.includes(t));
@@ -303,6 +309,7 @@ export function createMockBackend(): Backend {
     async setFavorite(id, value) {
       const item = find(id);
       item.favorite = value;
+      if (!value) item.group = null;
       changed('updated', id);
       return delay({ ...item });
     },
@@ -320,10 +327,28 @@ export function createMockBackend(): Backend {
     },
     async deleteItems(ids) {
       const before = items.length;
+      undo = {items: items.filter((i) => ids.includes(i.id)), deadline: Date.now() + 15000};
       items = items.filter((i) => !ids.includes(i.id));
       changed('deleted', ids.length === 1 ? ids[0] : null);
       return delay(before - items.length);
     },
+    async listItemIds(q) { return ordered().filter(i => matches(i,q)).map(i=>i.id); },
+    async undoDelete() {
+      if (!undo || Date.now() >= undo.deadline) return 0;
+      const n = undo.items.length; items.push(...undo.items); undo = null; changed('added',null); return n;
+    },
+    async getMergedText(ids, separator) {
+      if (ids.some(id=>find(id).kind !== 'text')) throw {code:'invalid'};
+      return ids.map(id=>find(id).text).join(separator);
+    },
+    async copyMerged(ids, separator) { const value = ids.map(id=>find(id).text).join(separator); await navigator.clipboard.writeText(value); },
+    async listGroups() { return [...new Set(items.filter(i=>i.favorite && i.group).map(i=>i.group!))].sort(); },
+    async setItemGroup(ids, group) { ids.forEach(id=>{ const item=find(id); item.group=group?.trim() || null; if(item.group) item.favorite=true; }); changed('updated',null); return ids.length; },
+    async renameGroup(name, replacement) { let n=0; items.forEach(i=>{if(i.group===name){i.group=replacement;n++;}}); changed('updated',null); return n; },
+    async webdavTest() { throw {code:'network',message:'WebDAV is available in the desktop app'}; },
+    async webdavList() { throw {code:'network'}; },
+    async webdavBackup() { throw {code:'network'}; },
+    async webdavRestore() { throw {code:'network'}; },
     async clearHistory(keepMarked) {
       const before = items.length;
       items = keepMarked ? items.filter((i) => i.favorite || i.pinned) : [];

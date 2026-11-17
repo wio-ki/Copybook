@@ -103,10 +103,12 @@ pub struct ClipItem {
     pub use_count: i64,
     pub created_at: i64,
     pub last_used_at: i64,
+    pub group: Option<String>,
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ListFilter {
+    #[default]
     All,
     Text,
     Image,
@@ -114,13 +116,17 @@ pub enum ListFilter {
     Url,
     Favorite,
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ListQuery {
     pub query: String,
     pub filter: ListFilter,
     pub offset: i64,
     pub limit: i64,
+    pub source_exe: Option<String>,
+    pub since: Option<i64>,
+    pub until: Option<i64>,
+    pub group: Option<String>,
 }
 #[derive(Debug, Serialize)]
 pub struct ListResult {

@@ -1,3 +1,4 @@
+mod backup;
 mod clipboard;
 mod commands;
 mod detect;
@@ -153,6 +154,17 @@ pub fn run() {
             commands::set_pinned,
             commands::set_note,
             commands::delete_items,
+            commands::list_item_ids,
+            commands::undo_delete,
+            commands::get_merged_text,
+            commands::copy_merged,
+            commands::list_groups,
+            commands::set_item_group,
+            commands::rename_group,
+            commands::webdav_test,
+            commands::webdav_list,
+            commands::webdav_backup,
+            commands::webdav_restore,
             commands::clear_history,
             commands::get_stats,
             commands::list_seen_apps,
@@ -232,4 +244,28 @@ pub fn test_dir() -> std::path::PathBuf {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.review/tests");
     std::fs::create_dir_all(&path).unwrap();
     path
+}
+
+#[cfg(test)]
+mod permissions_tests {
+    #[test]
+    fn registered_app_commands_are_allowed_in_local_webviews() {
+        let source = include_str!("lib.rs");
+        let handlers = source
+            .split(".invoke_handler(tauri::generate_handler![")
+            .nth(1)
+            .unwrap()
+            .split("])")
+            .next()
+            .unwrap();
+        let permissions = include_str!("../permissions/commands.toml");
+        let pattern = regex::Regex::new(r"commands::([a-z_]+)").unwrap();
+        for command in pattern.captures_iter(handlers) {
+            let name = &command[1];
+            assert!(
+                permissions.contains(&format!("\"{name}\"")),
+                "Registered command {name} must be callable by the local windows"
+            );
+        }
+    }
 }

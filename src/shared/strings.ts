@@ -109,6 +109,9 @@ const zh = {
     failed: '操作没有成功',
   },
   errors: {
+    auth: 'WebDAV 登录失败或没有访问权限',
+    crypto: '备份密码错误或文件已损坏',
+    too_large: '内容超过大小或数量限制',
     not_found: '这条记录已经不在了',
     invalid: '输入的内容不符合要求',
     hotkey_invalid: '这个组合键不能用作快捷键',
@@ -381,6 +384,9 @@ const en: Strings = {
     failed: 'That did not work',
   },
   errors: {
+    auth: 'WebDAV authentication or permission denied',
+    crypto: 'Incorrect backup password or damaged backup',
+    too_large: 'Content exceeds the size or item limit',
     not_found: 'This item no longer exists',
     invalid: 'That value is not allowed',
     hotkey_invalid: 'This combination cannot be a shortcut',
