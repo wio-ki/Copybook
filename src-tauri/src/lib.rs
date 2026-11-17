@@ -23,6 +23,13 @@ use tauri::Manager;
 fn initialize(app: &tauri::AppHandle) -> Result<()> {
     let state = app.state::<AppState>();
     let (settings, first) = settings::Settings::load(&state.dir)?;
+    if settings.run_as_admin && !platform::self_elevated() {
+        // Never start the clipboard pipeline with a lower token than the saved preference.
+        // The child waits for this instance to release the single-instance mutex.
+        let result = elevation::launch(&state.dir, false);
+        app.exit(0);
+        return result.map(|_| ());
+    }
     let mut db = storage::Storage::open(&state.dir)?;
     let removed = db.cleanup(&settings)?;
     *state.storage.lock().map_err(|_| CmdError::internal())? = Some(db);
@@ -51,7 +58,7 @@ fn initialize(app: &tauri::AppHandle) -> Result<()> {
         if let Err(e) = shell::start(&handle) {
             log::error!("Shell startup failed: {}", e.code);
         }
-        if std::env::args().any(|a| a == "--elevated-restart") {
+        if std::env::args().any(|a| a == "--show-settings") {
             let _ = window::open_settings(&handle, Some("general".into()));
         } else if first && !std::env::args().any(|a| a == "--autostart") {
             let _ = window::open_settings(&handle, None);

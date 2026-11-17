@@ -33,6 +33,8 @@ use windows::{
 
 const RESTART: &str = "--elevated-restart";
 const DATA_DIR: &str = "--elevation-data-dir";
+const SHOW_SETTINGS: &str = "--show-settings";
+const AUTOSTART: &str = "--autostart";
 
 struct Process(HANDLE);
 impl Drop for Process {
@@ -71,7 +73,13 @@ fn handoff(args: &[OsString]) -> Result<Option<(u32, PathBuf)>> {
     if !args.iter().any(|a| a == RESTART) {
         return Ok(None);
     }
-    if args.len() != 4 || args[0] != RESTART || args[2] != DATA_DIR {
+    if !(4..=6).contains(&args.len())
+        || args[0] != RESTART
+        || args[2] != DATA_DIR
+        || args[4..]
+            .iter()
+            .any(|a| a != SHOW_SETTINGS && a != AUTOSTART)
+    {
         return Err(CmdError::invalid("Invalid elevation restart arguments"));
     }
     let pid = args[1]
@@ -129,7 +137,7 @@ fn wait_for_exit(pid: u32) -> Result<()> {
 
 /// Returns false for UAC cancellation or an already-elevated process. The caller exits the
 /// original only after this returns true, so a declined prompt never shuts down Copybook.
-pub fn launch(dir: &Path) -> Result<bool> {
+pub fn launch(dir: &Path, show_settings: bool) -> Result<bool> {
     if platform::self_elevated() {
         return Ok(false);
     }
@@ -140,6 +148,12 @@ pub fn launch(dir: &Path) -> Result<bool> {
         .encode_utf16()
         .collect();
     parameters.extend(quote(dir.as_os_str()));
+    if show_settings {
+        parameters.extend(format!(" {SHOW_SETTINGS}").encode_utf16());
+    }
+    if std::env::args_os().any(|a| a == AUTOSTART) {
+        parameters.extend(format!(" {AUTOSTART}").encode_utf16());
+    }
     parameters.push(0);
     // SAFETY: initialize COM on this worker thread for ShellExecute's shell extensions.
     unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) }
@@ -204,6 +218,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(parsed, (42, PathBuf::from(r"C:\用户\Copybook data")));
+        assert!(handoff(&args(&[RESTART, "42", DATA_DIR, r"C:\data", AUTOSTART])).is_ok());
+        assert!(handoff(&args(&[RESTART, "42", DATA_DIR, r"C:\data", SHOW_SETTINGS])).is_ok());
         for bad in [
             vec![RESTART],
             vec![RESTART, "bad", DATA_DIR, r"C:\data"],

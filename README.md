@@ -52,8 +52,13 @@ Copybook 常驻托盘，记下你复制的文字、富文本、图片和文件�
 
 > 目标程序以管理员身份运行时，Windows 不允许普通程序向它发送按键：这时 Copybook 会把内容
 > 放进剪贴板并提示你手动 <kbd>Ctrl</kbd>+<kbd>V</kbd>。
-> 也可在「偏好设置 → 通用」中点击「以管理员权限重新启动」，通过 Windows 授权后即可向管理员程序自动粘贴。
-> 取消授权会继续以普通权限运行；此选项仅本次运行生效。
+> 也可开启「偏好设置 → 通用 → 以管理员权限运行」。开关会保存，之后每次启动（包括开机自启）
+> 都会请求 Windows UAC 授权并以管理员身份运行；关闭开关后，下次启动恢复普通权限。
+> 取消首次开启时的授权会撤销开关；已开启后，启动时取消授权会退出，避免以普通权限运行。
+
+在 Codex CLI / Claude Code CLI 中粘贴图片：先让 CLI 获得焦点，再打开 Copybook，双击图片记录。
+终端会收到一个带引号的 PNG 文件路径，CLI 将它识别为图片附件；无需修改任何快捷键。
+支持 Windows Terminal、传统控制台、mintty 等本机终端。路径包含中文或空格时也能识别。
 
 ## 从源码构建
 
@@ -99,8 +104,14 @@ for plain text; <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd> or <kbd>Ctrl</kbd>+<
 "do not record" hints and skips keys and tokens; optional <kbd>Win</kbd>+<kbd>V</kbd> takeover;
 light and dark themes; Chinese and English UI. Everything stays on your computer.
 
-Preferences → General offers **Restart as administrator** to paste into elevated apps after
-Windows approval. Cancelling leaves Copybook running normally. This applies to the current run.
+Preferences → General offers a persistent **Run as administrator** switch. Every later launch,
+including start at login, requests Windows UAC approval when needed. Turning it off takes effect
+on the next launch. Cancelling initial approval restores the switch; cancelling a later startup
+exits instead of running with normal permissions.
+
+To attach an image in Codex CLI or Claude Code CLI, focus the CLI, open Copybook and double-click
+the image. Local terminal hosts receive a quoted PNG path that the CLI recognizes as an image
+attachment, including paths with spaces or Chinese characters. No shortcut changes are needed.
 
 Build from source with the commands above. The frontend/backend contract lives in
 `docs/contract.md`. Feature set inspired by [EcoPaste](https://github.com/EcoPasteHub/EcoPaste).

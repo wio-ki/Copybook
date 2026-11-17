@@ -162,6 +162,28 @@ pub fn encode_dib(pixels: &RgbaImage) -> Vec<u8> {
     bytes
 }
 
+/// BITMAPV5HEADER with explicit RGBA masks, readable by native CLI clipboard libraries.
+pub fn encode_dibv5(pixels: &RgbaImage) -> Vec<u8> {
+    let dib = encode_dib(pixels);
+    let mut bytes = vec![0u8; 124];
+    bytes[..40].copy_from_slice(&dib[..40]);
+    bytes[..4].copy_from_slice(&124u32.to_le_bytes());
+    bytes[16..20].copy_from_slice(&3u32.to_le_bytes()); // BI_BITFIELDS
+    bytes[20..24].copy_from_slice(&(dib.len() as u32 - 40).to_le_bytes());
+    for (offset, mask) in [
+        (40, 0x00ff0000u32),
+        (44, 0x0000ff00),
+        (48, 0x000000ff),
+        (52, 0xff000000),
+    ] {
+        bytes[offset..offset + 4].copy_from_slice(&mask.to_le_bytes());
+    }
+    bytes[56..60].copy_from_slice(&0x73524742u32.to_le_bytes()); // LCS_sRGB
+    bytes[108..112].copy_from_slice(&4u32.to_le_bytes()); // LCS_GM_IMAGES
+    bytes.extend_from_slice(&dib[40..]);
+    bytes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,5 +233,15 @@ mod tests {
         fields.extend(&dib[40..]);
         assert_eq!(decode_dib(&fields).unwrap(), image);
         assert!(decode_dib(&dib[..20]).is_err());
+    }
+
+    #[test]
+    fn dibv5_preserves_orientation_colors_and_transparency() {
+        let image = RgbaImage::from_fn(3, 2, |x, y| {
+            image::Rgba([x as u8 * 50, y as u8 * 80, 37, 120])
+        });
+        let dib = encode_dibv5(&image);
+        assert_eq!(dib.len(), 124 + 3 * 2 * 4);
+        assert_eq!(decode_dib(&dib).unwrap(), image);
     }
 }

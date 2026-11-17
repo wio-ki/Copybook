@@ -14,7 +14,7 @@ Windows 10/11 only. No macOS or Linux code paths.
 | --- | --- |
 | productName | `Copybook` |
 | identifier | `io.github.wio-ki.copybook` |
-| version | `1.1.0` (single source: `package.json`, `tauri.conf.json` reads it) |
+| version | `1.2.0` (single source: `package.json`, `tauri.conf.json` reads it) |
 | data dir | Tauri `app_data_dir()` = `%APPDATA%\io.github.wio-ki.copybook\` |
 | database | `<data>\copybook.db` (SQLite, WAL) |
 | settings | `<data>\settings.json` |
@@ -181,6 +181,7 @@ interface Settings {
   theme: 'system' | 'light' | 'dark';
   density: 'comfortable' | 'compact';   // frontend only, backend just stores it
   autostart: boolean;
+  runAsAdmin: boolean;       // persistent elevation preference, independent of current token
   hotkey: string;            // see "Hotkey strings"; '' = no hotkey
   winV: boolean;             // take over Win+V
   panelPosition: 'cursor' | 'center' | 'remember';
@@ -211,7 +212,7 @@ Default settings (also the fallback for every missing or invalid key in `setting
 ```json
 {
   "language": "system", "theme": "system", "density": "comfortable",
-  "autostart": false, "hotkey": "Alt+KeyV", "winV": false,
+  "autostart": false, "runAsAdmin": false, "hotkey": "Alt+KeyV", "winV": false,
   "panelPosition": "cursor", "hideOnBlur": true,
   "autoPaste": true, "pastePlain": false, "moveToTop": true,
   "captureText": true, "captureRich": true, "captureImages": true, "captureFiles": true,
@@ -223,6 +224,14 @@ Default settings (also the fallback for every missing or invalid key in `setting
 
 On the very first start (no `settings.json` yet) show the settings window, so the user sees
 the hotkey.
+
+`runAsAdmin` is a switch. Enabling saves the preference and requests an elevated restart
+unless already elevated; cancellation/failure restores the previous preference. Every later
+launch (including `--autostart`) checks it before starting capture and requests UAC when
+needed. A declined startup prompt exits instead of running unelevated with the switch on.
+The elevated replacement preserves the data directory and silent startup; only an explicit
+settings restart reopens General. Disabling takes effect on the next launch; the current
+process keeps its Windows token until it exits.
 
 ### Hotkey strings
 
@@ -317,9 +326,15 @@ Panel keyboard (frontend): quick paste is `Ctrl+1..9` or `Ctrl+Shift+1..9`; some
 ### Paste (`paste_item`)
 
 1. Write the item to the clipboard: text as `CF_UNICODETEXT`, plus `HTML Format` and
-   `Rich Text Format` when stored and `plain` is false; image as `CF_DIB` plus `PNG`;
+   `Rich Text Format` when stored and `plain` is false; image as `CF_DIB`, `CF_DIBV5` and `PNG`;
    files as `CF_HDROP` plus `Preferred DropEffect` = copy (with `plain`, the paths as text).
    Record the sequence number so the watcher ignores this write. Bump if `moveToTop`.
+   For image auto-paste into terminal hosts (including Codex CLI / Claude Code CLI), also
+   supply `CF_UNICODETEXT` containing one double-quoted absolute PNG path, without newline.
+   Keep an independent PNG copy in `<data>\paste-images\<sha256>.png` so removing history
+   does not invalidate a pending CLI attachment. Terminal Ctrl+V then delivers a file path
+   even when the terminal intercepts the CLI's image shortcut; native image formats remain
+   available. Copy-only and non-terminal paste keep image-only clipboard semantics.
 2. If `autoPaste` is false: hide with focus restore, return `{ pasted: false, reason: 'paste_disabled' }`.
 3. If there is no valid paste target: hide, return `no_target`.
 4. If the target process is elevated and Copybook is not: keep the panel open and return

@@ -247,6 +247,16 @@ pub struct Writer {
 }
 impl Writer {
     pub fn write(&self, content: &StoredContent, plain: bool, owner: HWND) -> Result<()> {
+        self.write_for_paste(content, plain, owner, None)
+    }
+
+    pub fn write_for_paste(
+        &self,
+        content: &StoredContent,
+        plain: bool,
+        owner: HWND,
+        image_path: Option<&str>,
+    ) -> Result<()> {
         // Encode before opening clipboard, so readers are blocked for as little time as possible.
         let mut formats = Vec::new();
         match content.item.kind {
@@ -281,7 +291,11 @@ impl Writer {
                     .map_err(|_| CmdError::new("io", "Stored image is invalid"))?
                     .to_rgba8();
                 formats.push((DIB, formats::encode_dib(&pixels)));
+                formats.push((DIBV5, formats::encode_dibv5(&pixels)));
                 formats.push((format("PNG"), data));
+                if let Some(path) = image_path {
+                    formats.push((UNICODE, text_bytes(path)));
+                }
             }
         }
         let _gate = self.gate.lock().map_err(|_| CmdError::internal())?;
@@ -812,7 +826,11 @@ mod tests {
                     );
                 }
                 if item.kind == ClipKind::Image {
-                    assert!(available(DIB) && available(format("PNG")));
+                    assert!(available(DIB) && available(DIBV5) && available(format("PNG")));
+                    assert!(
+                        text().is_none(),
+                        "non-terminal image copies must not turn into paths"
+                    );
                 }
                 if item.kind == ClipKind::Files && !plain {
                     assert_eq!(
@@ -822,11 +840,29 @@ mod tests {
                 }
                 drop(guard);
             }
+            if item.kind == ClipKind::Image {
+                let path = format!("\"{}\"", item.image.as_ref().unwrap().path);
+                writer
+                    .write_for_paste(&content, false, window, Some(&path))
+                    .unwrap();
+                let _guard = ClipboardGuard::open(Some(window)).unwrap();
+                assert_eq!(text().as_deref(), Some(path.as_str()));
+                assert!(available(DIB) && available(DIBV5) && available(format("PNG")));
+                let png = bytes(format("PNG"), 20 * 1024 * 1024).unwrap();
+                let pixels = image::load_from_memory_with_format(&png, image::ImageFormat::Png)
+                    .unwrap()
+                    .to_rgba8();
+                assert_eq!(
+                    formats::decode_dib(&bytes(DIBV5, 20 * 1024 * 1024).unwrap()).unwrap(),
+                    pixels
+                );
+                assert_eq!(writer.sequence.load(Ordering::SeqCst), sequence());
+            }
         }
         thread::sleep(Duration::from_millis(350));
         assert!(events.try_recv().is_err());
         assert_eq!(list().total, 5);
-        println!("writer round trips: rich/plain text, PNG+CF_DIB, CF_HDROP+copy effect, plain file paths");
+        println!("writer round trips: rich/plain text, PNG+CF_DIB+CF_DIBV5, quoted terminal PNG path, CF_HDROP+copy effect, plain file paths");
         println!(
             "captured text/url, HTML+RTF, PNG+DIB image, files, HTML-only; all sources populated"
         );

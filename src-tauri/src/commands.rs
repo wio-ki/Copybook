@@ -193,7 +193,7 @@ pub fn get_app_info(app: AppHandle) -> Result<AppInfo> {
 #[tauri::command]
 pub async fn restart_as_admin(app: AppHandle) -> Result<bool> {
     let launched = blocking(app.clone(), |a| {
-        crate::elevation::launch(&a.state::<AppState>().dir)
+        crate::elevation::launch(&a.state::<AppState>().dir, true)
     })
     .await?;
     if launched {

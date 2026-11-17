@@ -102,6 +102,70 @@ pub fn foreground() -> HWND {
     // SAFETY: no arguments or owned resources.
     unsafe { GetForegroundWindow() }
 }
+
+fn terminal_host(class: &str, exe: &str, title: &str) -> bool {
+    if [
+        "CASCADIA_HOSTING_WINDOW_CLASS",
+        "ConsoleWindowClass",
+        "mintty",
+        "VirtualConsoleClass",
+        "org.wezfurlong.wezterm",
+        "Alacritty",
+    ]
+    .contains(&class)
+    {
+        return true;
+    }
+    let exe = exe.to_ascii_lowercase();
+    if [
+        "windowsterminal.exe",
+        "wezterm-gui.exe",
+        "alacritty.exe",
+        "mintty.exe",
+        "conemu.exe",
+        "conemu64.exe",
+    ]
+    .contains(&exe.as_str())
+    {
+        return true;
+    }
+    // Integrated terminals share their top-level HWND with the editor. Only opt in when
+    // its title explicitly names a CLI, rather than treating every editor as a terminal.
+    [
+        "code.exe",
+        "code - insiders.exe",
+        "cursor.exe",
+        "windsurf.exe",
+    ]
+    .contains(&exe.as_str())
+        && title
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|s| s.eq_ignore_ascii_case("codex") || s.eq_ignore_ascii_case("claude"))
+}
+
+pub fn terminal(window: HWND) -> bool {
+    let mut class = [0u16; 256];
+    let mut title = [0u16; 1024];
+    // SAFETY: both Win32 calls write only into the sized, live UTF-16 buffers.
+    let (class_len, title_len) = unsafe {
+        (
+            GetClassNameW(window, &mut class),
+            GetWindowTextW(window, &mut title),
+        )
+    };
+    let exe = process_path(pid(window))
+        .and_then(|p| {
+            Path::new(&p)
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+        })
+        .unwrap_or_default();
+    terminal_host(
+        &String::from_utf16_lossy(&class[..class_len.max(0) as usize]),
+        &exe,
+        &String::from_utf16_lossy(&title[..title_len.max(0) as usize]),
+    )
+}
 pub fn force_foreground(window: HWND) -> bool {
     // SAFETY: validate HWND; attached thread input is detached on every path below.
     unsafe {
@@ -439,4 +503,41 @@ fn exe_icon(path: &str) -> Option<image::RgbaImage> {
 pub fn chinese_ui() -> bool {
     // SAFETY: reads OS language without accessing memory supplied by the caller.
     unsafe { windows::Win32::Globalization::GetUserDefaultUILanguage() & 0x3ff == 0x04 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn distinguishes_terminal_hosts_from_regular_image_consumers() {
+        assert!(terminal_host(
+            "CASCADIA_HOSTING_WINDOW_CLASS",
+            "WindowsTerminal.exe",
+            "PowerShell"
+        ));
+        assert!(terminal_host(
+            "ConsoleWindowClass",
+            "conhost.exe",
+            "Claude Code"
+        ));
+        assert!(terminal_host("mintty", "mintty.exe", "bash"));
+        assert!(terminal_host(
+            "Chrome_WidgetWin_1",
+            "Code.exe",
+            "Codex — workspace"
+        ));
+        assert!(terminal_host(
+            "Chrome_WidgetWin_1",
+            "Code.exe",
+            "Claude Code — workspace"
+        ));
+        assert!(!terminal_host(
+            "Chrome_WidgetWin_1",
+            "Code.exe",
+            "app.ts — workspace"
+        ));
+        assert!(!terminal_host("Chrome_WidgetWin_1", "chrome.exe", "Claude"));
+        assert!(!terminal_host("MSPaintApp", "mspaint.exe", "Untitled"));
+    }
 }

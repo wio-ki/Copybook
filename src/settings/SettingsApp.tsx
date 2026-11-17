@@ -8,7 +8,6 @@ import {
   Plus,
   Radio,
   RefreshCw,
-  Shield,
   SlidersHorizontal,
   X,
 } from 'lucide-react';
@@ -150,10 +149,12 @@ function General({ settings, save, notify }: { settings: Settings; save: SaveFn;
     void api.getAppInfo().then(setInfo).catch((e) => notify(t.errors[toCmdError(e).code]));
   }, [notify, t]);
 
-  const restartAsAdmin = async () => {
-    if (restarting || !info || info.elevated) return;
+  const changeRunAsAdmin = async (runAsAdmin: boolean) => {
+    if (restarting || !info) return;
     setRestarting(true);
     try {
+      if (!(await save({ runAsAdmin }))) return;
+      if (!runAsAdmin || info.elevated) return;
       const launched = await api.restartAsAdmin();
       if (launched) {
         setInfo({ ...info, elevated: true });
@@ -161,8 +162,12 @@ function General({ settings, save, notify }: { settings: Settings; save: SaveFn;
       }
       const current = await api.getAppInfo();
       setInfo(current);
-      if (!current.elevated) notify(g.adminCancelled);
+      if (!current.elevated) {
+        await save({ runAsAdmin: false });
+        notify(g.adminCancelled);
+      }
     } catch {
+      await save({ runAsAdmin: false });
       notify(g.adminFailed);
     } finally {
       setRestarting(false);
@@ -220,16 +225,13 @@ function General({ settings, save, notify }: { settings: Settings; save: SaveFn;
         <Row label={g.autostart} hint={g.autostartHint} htmlFor="s-autostart">
           <Switch id="s-autostart" checked={settings.autostart} onChange={(autostart) => void save({ autostart })} />
         </Row>
-        <Row label={g.admin} hint={info?.elevated ? g.adminHintActive : g.adminHint}>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => void restartAsAdmin()}
-            disabled={!info || info.elevated || restarting}
-          >
-            <Shield size={14} strokeWidth={1.75} aria-hidden="true" />
-            {info?.elevated ? g.adminActive : restarting ? g.adminRestarting : g.adminRestart}
-          </button>
+        <Row label={g.admin} hint={restarting ? g.adminRestarting : !settings.runAsAdmin && info?.elevated ? g.adminHintActive : g.adminHint} htmlFor="s-admin">
+          <Switch
+            id="s-admin"
+            checked={settings.runAsAdmin}
+            onChange={(runAsAdmin) => void changeRunAsAdmin(runAsAdmin)}
+            disabled={!info || restarting}
+          />
         </Row>
       </Group>
 

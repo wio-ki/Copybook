@@ -110,6 +110,7 @@ export interface Settings {
   theme: ThemeSetting;
   density: Density;
   autostart: boolean;
+  runAsAdmin: boolean;
   hotkey: string;
   winV: boolean;
   panelPosition: PanelPosition;
@@ -162,6 +163,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   density: 'comfortable',
   autostart: false,
+  runAsAdmin: false,
   hotkey: 'Alt+KeyV',
   winV: false,
   panelPosition: 'cursor',

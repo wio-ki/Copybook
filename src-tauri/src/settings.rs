@@ -11,6 +11,7 @@ pub struct Settings {
     pub theme: String,
     pub density: String,
     pub autostart: bool,
+    pub run_as_admin: bool,
     pub hotkey: String,
     pub win_v: bool,
     pub panel_position: String,
@@ -37,6 +38,7 @@ impl Default for Settings {
             theme: "system".into(),
             density: "comfortable".into(),
             autostart: false,
+            run_as_admin: false,
             hotkey: "Alt+KeyV".into(),
             win_v: false,
             panel_position: "cursor".into(),
@@ -160,6 +162,7 @@ fn valid_key(key: &str, value: &Value) -> bool {
             })
         }),
         "autostart"
+        | "runAsAdmin"
         | "winV"
         | "hideOnBlur"
         | "autoPaste"
@@ -306,5 +309,24 @@ mod tests {
             hotkey("Super+Alt+Backquote").unwrap().0,
             "Alt+Super+Backquote"
         );
+    }
+
+    #[test]
+    fn administrator_preference_survives_restart_and_old_settings() {
+        let dir = tempfile::tempdir_in(crate::test_dir()).unwrap();
+        assert!(!Settings::tolerant(serde_json::json!({"autostart": true})).run_as_admin);
+        let enabled = Settings::default()
+            .patch(serde_json::json!({"runAsAdmin": true}))
+            .unwrap();
+        enabled.save(dir.path()).unwrap();
+        assert!(Settings::load(dir.path()).unwrap().0.run_as_admin);
+        let disabled = enabled
+            .patch(serde_json::json!({"runAsAdmin": false}))
+            .unwrap();
+        disabled.save(dir.path()).unwrap();
+        assert!(!Settings::load(dir.path()).unwrap().0.run_as_admin);
+        assert!(disabled
+            .patch(serde_json::json!({"runAsAdmin": "true"}))
+            .is_err());
     }
 }

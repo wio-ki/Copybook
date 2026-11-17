@@ -17,7 +17,7 @@ with sqlite3.connect(data_dir / "copybook.db") as db:
 
 defaults = {
     "language": "system", "theme": "system", "density": "comfortable",
-    "autostart": False, "hotkey": "Alt+KeyV", "winV": False,
+    "autostart": False, "runAsAdmin": False, "hotkey": "Alt+KeyV", "winV": False,
     "panelPosition": "cursor", "hideOnBlur": True,
     "autoPaste": True, "pastePlain": False, "moveToTop": True,
     "captureText": True, "captureRich": True, "captureImages": True, "captureFiles": True,
@@ -27,4 +27,4 @@ defaults = {
 }
 assert json.loads((data_dir / "settings.json").read_text(encoding="utf-8")) == defaults
 print(f"SQLite: exactly 1 matching text row; use_count={rows[0][1]}; WAL enabled")
-print("settings.json: all 22 defaults match the contract")
+print(f"settings.json: all {len(defaults)} defaults match the contract")
