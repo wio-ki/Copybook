@@ -295,16 +295,26 @@ pub fn force_foreground(window: HWND) -> bool {
     }
 }
 pub fn key(code: VIRTUAL_KEY, up: bool) -> INPUT {
+    // Flutter identifies physical keys by scan code: leaving both Ctrl and V at zero
+    // makes them collide and drops the paste modifier (flutter/flutter#99198).
+    // Keep wVk authoritative so Ctrl+V still means logical V on other keyboard layouts.
+    // SAFETY: this read-only mapping accepts any virtual key; unmapped placeholders return 0.
+    let scan = unsafe { MapVirtualKeyW(u32::from(code.0), MAPVK_VK_TO_VSC_EX) };
+    let mut flags = if up {
+        KEYEVENTF_KEYUP
+    } else {
+        KEYBD_EVENT_FLAGS(0)
+    };
+    if scan >> 8 == 0xe0 {
+        flags |= KEYEVENTF_EXTENDEDKEY;
+    }
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
                 wVk: code,
-                dwFlags: if up {
-                    KEYEVENTF_KEYUP
-                } else {
-                    KEYBD_EVENT_FLAGS(0)
-                },
+                wScan: (scan & 0xff) as u16,
+                dwFlags: flags,
                 ..Default::default()
             },
         },
@@ -619,6 +629,143 @@ pub fn chinese_ui() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paste_keys_have_distinct_physical_identities() {
+        // Flutter tracks held keys by scan code. Zero for both Ctrl and V aliases them,
+        // losing the modifier even though their virtual keys differ (flutter/flutter#99198).
+        let control = key(VK_CONTROL, false);
+        let paste = key(VK_V, false);
+        // SAFETY: key() constructs the keyboard member of INPUT for both events.
+        let (control, paste) = unsafe { (control.Anonymous.ki, paste.Anonymous.ki) };
+        assert_ne!(control.wScan, 0, "Ctrl needs a physical key identity");
+        assert_ne!(paste.wScan, 0, "V needs a physical key identity");
+        assert_ne!(control.wScan, paste.wScan, "Ctrl must remain held for V");
+        assert_eq!(control.wVk, VK_CONTROL);
+        assert_eq!(paste.wVk, VK_V);
+        assert!(!paste.dwFlags.contains(KEYEVENTF_SCANCODE));
+    }
+
+    #[test]
+    fn synthetic_keys_preserve_extended_keys_and_unmapped_placeholder() {
+        for code in [VK_RCONTROL, VK_LWIN, VK_PLACEHOLDER] {
+            let down = key(code, false);
+            let up = key(code, true);
+            // SAFETY: key() initializes the keyboard member of each INPUT.
+            let (down, up) = unsafe { (down.Anonymous.ki, up.Anonymous.ki) };
+            assert_eq!(down.wVk, code);
+            assert_eq!(up.wVk, code);
+            assert_eq!(down.wScan, up.wScan);
+            assert_eq!(up.dwFlags, down.dwFlags | KEYEVENTF_KEYUP);
+            assert!(!down.dwFlags.contains(KEYEVENTF_SCANCODE));
+            if code == VK_PLACEHOLDER {
+                assert_eq!(down.wScan, 0);
+                assert_eq!(down.dwFlags, KEYBD_EVENT_FLAGS(0));
+            } else {
+                assert_ne!(down.wScan, 0);
+                assert!(down.dwFlags.contains(KEYEVENTF_EXTENDEDKEY));
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires a Windows desktop; sends Ctrl+V only into a throwaway window without reading the clipboard"]
+    fn paste_delivers_distinct_scancodes_to_the_original_input() {
+        use windows::core::w;
+        struct Restore {
+            foreground: HWND,
+            window: HWND,
+        }
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                // SAFETY: this fixture owns the window and all its children on this thread.
+                unsafe {
+                    let _ = DestroyWindow(self.window);
+                }
+                force_foreground(self.foreground);
+            }
+        }
+        let original = foreground();
+        // SAFETY: standard window classes with live parents, owned by the RAII guard.
+        unsafe {
+            let window = CreateWindowExW(
+                WS_EX_TOOLWINDOW,
+                w!("STATIC"),
+                w!("Copybook paste scan-code fixture"),
+                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                -10000,
+                -10000,
+                240,
+                160,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            let _restore = Restore {
+                foreground: original,
+                window,
+            };
+            let edit = CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("EDIT"),
+                w!(""),
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                0,
+                0,
+                200,
+                24,
+                Some(window),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            assert!(force_foreground(window));
+            SetFocus(Some(edit)).unwrap();
+            let saved = target(window, HWND::default()).unwrap();
+            assert_eq!(saved.focus, Some(edit.0 as isize));
+            paste_to(saved).unwrap();
+
+            let mut received = Vec::new();
+            let start = Instant::now();
+            while received.len() < 4 && start.elapsed() < Duration::from_secs(1) {
+                let mut message = MSG::default();
+                while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                    if matches!(message.message, WM_KEYDOWN | WM_KEYUP)
+                        && [usize::from(VK_CONTROL.0), usize::from(VK_V.0)]
+                            .contains(&message.wParam.0)
+                    {
+                        assert_eq!(message.hwnd, edit, "Keys must reach the saved input");
+                        let scan = (message.lParam.0 >> 16) & 0xff;
+                        received.push((message.message, message.wParam.0, scan));
+                        // Do not dispatch keyboard messages: this test checks input metadata
+                        // without letting EDIT paste or read the user's clipboard.
+                    } else {
+                        let _ = DispatchMessageW(&message);
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(received.len(), 4, "One complete Ctrl+V chord: {received:?}");
+            let control_scan = received[0].2;
+            let paste_scan = received[1].2;
+            assert_ne!(control_scan, 0, "Windows must receive the Ctrl scan code");
+            assert_ne!(paste_scan, 0, "Windows must receive the V scan code");
+            assert_ne!(control_scan, paste_scan, "Physical keys must not collide");
+            assert_eq!(
+                received,
+                [
+                    (WM_KEYDOWN, usize::from(VK_CONTROL.0), control_scan),
+                    (WM_KEYDOWN, usize::from(VK_V.0), paste_scan),
+                    (WM_KEYUP, usize::from(VK_V.0), paste_scan),
+                    (WM_KEYUP, usize::from(VK_CONTROL.0), control_scan),
+                ]
+            );
+            println!("one Ctrl+V chord delivered to saved input; distinct nonzero scan codes: Ctrl={control_scan:#x}, V={paste_scan:#x}");
+        }
+    }
 
     #[test]
     #[ignore = "requires a Windows desktop; uses only throwaway windows and does not change the clipboard"]
