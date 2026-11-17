@@ -11,12 +11,24 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Check release signing configuration
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            throw 'TAURI_SIGNING_PRIVATE_KEY is required to publish installable updates.'
+          }
+          $version = (Get-Content -Raw -LiteralPath package.json | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_NAME -ne "v$version") {
+            throw 'Release tag must match package.json version.'
+          }
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run build
+      - run: python -B -m unittest discover -s src-tauri/scripts -p test_validate_updater_release.py -v
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -30,12 +42,38 @@ jobs:
       - run: cargo test
         working-directory: src-tauri
       - uses: tauri-apps/tauri-action@v1
+        id: bundle
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Copybook v__VERSION__
           releaseBody: Windows NSIS installer.
           releaseDraft: true
           prerelease: false
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
+          updaterJsonPreferNsis: true
           args: --bundles nsis
+      - name: Validate uploaded Windows update
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.bundle.outputs.releaseId }}
+        run: |
+          $version = (Get-Content -Raw -LiteralPath package.json | ConvertFrom-Json).version
+          $assetName = "Copybook_${version}_x64-setup.exe"
+          $assetDir = Join-Path $env:GITHUB_WORKSPACE '.review/release-validation'
+          New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
+          gh release download $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY --pattern latest.json --pattern $assetName --pattern "$assetName.sig" --dir $assetDir --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download all updater release assets.' }
+          $releaseApi = 'repos/{0}/releases/{1}' -f $env:GITHUB_REPOSITORY, $env:RELEASE_ID
+          gh api $releaseApi | Set-Content -LiteralPath (Join-Path $assetDir 'release.json') -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read release asset metadata.' }
+          $installerVersion = (Get-Item -LiteralPath (Join-Path $assetDir $assetName)).VersionInfo.ProductVersion
+          if ($installerVersion -ne $version) { throw 'Installer product version does not match the release.' }
+          python src-tauri/scripts/validate_updater_release.py $assetDir --repository $env:GITHUB_REPOSITORY --tag $env:GITHUB_REF_NAME
+          if ($LASTEXITCODE -ne 0) { throw 'Windows updater release validation failed.' }
+      - name: Verify updater installer arguments
+        run: .\src-tauri\scripts\smoke_updater_arguments.ps1

@@ -23,6 +23,7 @@ Copybook 常驻托盘，记下你复制的文字、富文本、图片和文件�
 - **识别**：链接、邮箱、颜色值、文件路径和代码片段各有自己的显示方式。
 - **搜索**：全文搜索，一两个汉字也能搜；可按 文本 / 图片 / 文件 / 链接 / 收藏 筛选；备注也能被搜到。
 - **整理**：收藏、置顶、给记录写备注（以朱红色批注显示）。
+- **来源**：可在「偏好设置 → 通用 → 面板」中关闭来源应用的名称和图标显示。
 - **粘贴**：<kbd>Enter</kbd> 粘贴，<kbd>Shift</kbd>+<kbd>Enter</kbd> 换一种格式（纯文本 / 原格式），
   <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd> 直接粘贴前九条。
 - **隐私**：遵从密码管理器的"不要记录"标记，跳过私钥、访问令牌和 JWT，可以忽略指定程序；
@@ -49,6 +50,10 @@ Copybook 常驻托盘，记下你复制的文字、富文本、图片和文件�
 
 从 [Releases](https://github.com/wio-ki/Copybook/releases) 下载 `Copybook_x.y.z_x64-setup.exe`。
 安装到当前用户，不需要管理员权限。需要 Windows 10/11（系统自带 WebView2）。
+
+从 v1.3.0 起，可在「偏好设置 → 关于 → 检查更新」中直接下载并安装新版。
+更新包会进行签名和版本校验，自动覆盖安装并重启，保留历史和设置，无需手动卸载。
+v1.2.0 及更早版本需先覆盖安装 v1.3.0 一次，之后即可使用应用内更新。
 
 > 目标程序以管理员身份运行时，Windows 不允许普通程序向它发送按键：这时 Copybook 会把内容
 > 放进剪贴板并提示你手动 <kbd>Ctrl</kbd>+<kbd>V</kbd>。
@@ -103,6 +108,11 @@ images, files, links and starred items; stars, pins and notes; <kbd>Shift</kbd>+
 for plain text; <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>1</kbd>–<kbd>9</kbd> quick paste; respects password-manager
 "do not record" hints and skips keys and tokens; optional <kbd>Win</kbd>+<kbd>V</kbd> takeover;
 light and dark themes; Chinese and English UI. Everything stays on your computer.
+
+Source app names/icons can be hidden in Preferences → General → Panel. From v1.3.0,
+Preferences → About downloads and verifies signed updates, installs over the existing app
+and restarts it without a manual uninstall. History and settings are preserved. Versions
+before v1.3.0 need one installer upgrade to gain the in-app updater.
 
 Preferences → General offers a persistent **Run as administrator** switch. Every later launch,
 including start at login, requests Windows UAC approval when needed. Turning it off takes effect

@@ -10,6 +10,7 @@ pub struct Settings {
     pub language: String,
     pub theme: String,
     pub density: String,
+    pub show_source: bool,
     pub autostart: bool,
     pub run_as_admin: bool,
     pub hotkey: String,
@@ -37,6 +38,7 @@ impl Default for Settings {
             language: "system".into(),
             theme: "system".into(),
             density: "comfortable".into(),
+            show_source: true,
             autostart: false,
             run_as_admin: false,
             hotkey: "Alt+KeyV".into(),
@@ -162,6 +164,7 @@ fn valid_key(key: &str, value: &Value) -> bool {
             })
         }),
         "autostart"
+        | "showSource"
         | "runAsAdmin"
         | "winV"
         | "hideOnBlur"
@@ -275,6 +278,25 @@ mod tests {
         assert!(s.auto_paste);
         s.save(dir.path()).unwrap();
         assert_eq!(Settings::load(dir.path()).unwrap(), (s, false));
+    }
+
+    #[test]
+    fn source_visibility_is_persistent_and_does_not_change_capture() {
+        let original = Settings::default();
+        assert!(Settings::tolerant(serde_json::json!({"theme": "dark"})).show_source);
+        let hidden = original
+            .patch(serde_json::json!({"showSource": false}))
+            .unwrap();
+        assert!(!hidden.show_source);
+        assert_eq!(hidden.capture_text, original.capture_text);
+        assert_eq!(hidden.capture_images, original.capture_images);
+        assert_eq!(hidden.ignored_apps, original.ignored_apps);
+        let dir = tempfile::tempdir_in(crate::test_dir()).unwrap();
+        hidden.save(dir.path()).unwrap();
+        assert!(!Settings::load(dir.path()).unwrap().0.show_source);
+        assert!(hidden
+            .patch(serde_json::json!({"showSource": "false"}))
+            .is_err());
     }
     #[test]
     fn ranges_and_hotkeys() {

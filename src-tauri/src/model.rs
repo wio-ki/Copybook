@@ -168,6 +168,24 @@ pub struct UpdateInfo {
     pub url: String,
     pub installer: Option<String>,
 }
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProgress {
+    pub stage: &'static str,
+    pub version: Option<String>,
+    pub downloaded: u64,
+    pub total: Option<u64>,
+}
+impl Default for UpdateProgress {
+    fn default() -> Self {
+        Self {
+            stage: "idle",
+            version: None,
+            downloaded: 0,
+            total: None,
+        }
+    }
+}
 #[derive(Debug, Serialize)]
 pub struct SeenApp {
     #[serde(flatten)]

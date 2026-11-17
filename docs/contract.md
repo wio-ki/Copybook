@@ -14,7 +14,7 @@ Windows 10/11 only. No macOS or Linux code paths.
 | --- | --- |
 | productName | `Copybook` |
 | identifier | `io.github.wio-ki.copybook` |
-| version | `1.2.0` (single source: `package.json`, `tauri.conf.json` reads it) |
+| version | `1.3.0` (single source: `package.json`, `tauri.conf.json` reads it) |
 | data dir | Tauri `app_data_dir()` = `%APPDATA%\io.github.wio-ki.copybook\` |
 | database | `<data>\copybook.db` (SQLite, WAL) |
 | settings | `<data>\settings.json` |
@@ -174,12 +174,20 @@ interface UpdateInfo {
   installer: string | null;  // direct download of the NSIS installer, when the release has one
 }
 
+interface UpdateProgress {
+  stage: 'idle' | 'downloading' | 'installing' | 'error';
+  version: string | null;
+  downloaded: number;      // bytes received, cumulative
+  total: number | null;    // null when the server omits Content-Length
+}
+
 interface SeenApp extends SourceApp { count: number }   // distinct sources in history
 
 interface Settings {
   language: 'system' | 'zh-CN' | 'en-US';
   theme: 'system' | 'light' | 'dark';
   density: 'comfortable' | 'compact';   // frontend only, backend just stores it
+  showSource: boolean;       // show source app name/icon in history rows and details; capture unchanged
   autostart: boolean;
   runAsAdmin: boolean;       // persistent elevation preference, independent of current token
   hotkey: string;            // see "Hotkey strings"; '' = no hotkey
@@ -211,7 +219,7 @@ Default settings (also the fallback for every missing or invalid key in `setting
 
 ```json
 {
-  "language": "system", "theme": "system", "density": "comfortable",
+  "language": "system", "theme": "system", "density": "comfortable", "showSource": true,
   "autostart": false, "runAsAdmin": false, "hotkey": "Alt+KeyV", "winV": false,
   "panelPosition": "cursor", "hideOnBlur": true,
   "autoPaste": true, "pastePlain": false, "moveToTop": true,
@@ -310,7 +318,9 @@ Panel keyboard (frontend): quick paste is `Ctrl+1..9` or `Ctrl+Shift+1..9`; some
 | `reveal_path` | `{ path }` | `void` | Explorer with the item selected |
 | `open_data_dir` | `{}` | `void` | |
 | `get_app_info` | `{}` | `AppInfo` | |
-| `check_update` | `{}` | `UpdateInfo` | asks the GitHub Releases API for the newest release; never downloads or installs anything itself; network failures are `network` |
+| `check_update` | `{}` | `UpdateInfo` | user-triggered check of the official signed Tauri update feed; caches a newer update for installation; never downloads an installer by itself; network failures are `network` |
+| `install_update` | `{}` | `void` | downloads the last checked newer update, verifies its signature and signed version, then runs the Windows updater; no browser, manual uninstall or installer steps; exits only after the updater starts; errors retain the pending update for retry, keep the app running and publish error progress |
+| `get_update_progress` | `{}` | `UpdateProgress` | current process-wide download/install status, including after navigating away from About |
 | `restart_as_admin` | `{}` | `boolean` | requests UAC and restarts elevated; `false` on cancellation or if already elevated; `io` on launch failure; current instance exits only after a successful launch |
 
 ### Search (`list_items`)
@@ -354,6 +364,7 @@ Panel keyboard (frontend): quick paste is `Ctrl+1..9` or `Ctrl+Shift+1..9`; some
 | `settings://changed` | `Settings` | after `update_settings` succeeds |
 | `settings://navigate` | `{ section: string }` | from `open_settings` |
 | `capture://paused` | `{ paused: boolean }` | pause state changed (command or tray) |
+| `update://progress` | `UpdateProgress` | update download starts/progresses, verified installation starts, or a failure occurs |
 
 ## 7. Shell integration (backend)
 
@@ -370,20 +381,34 @@ Panel keyboard (frontend): quick paste is `Ctrl+1..9` or `Ctrl+Shift+1..9`; some
   language: Chinese if it starts with `zh`, else English):
   `打开面板 / Open panel` (shows the hotkey), `暂停记录 / Pause capture` (check item),
   `偏好设置… / Preferences…`, separator, `退出 / Quit`.
-* **Update check** (`check_update`, user-triggered only): `GET
-  https://api.github.com/repos/wio-ki/Copybook/releases/latest` with a `User-Agent` header, a
-  connect and total timeout of about 8 s. Read `tag_name` and `html_url`; take the asset whose
-  name ends in `-setup.exe` as `installer`. Strip a leading `v` from the tag, then compare
-  dotted numeric versions component by component (`newer` is a strict greater-than; a
-  pre-release suffix such as `-beta.1` sorts below its release). Any transport, TLS, HTTP or
-  JSON problem is `network`. Nothing is sent on a timer: only a click reaches GitHub.
+* **App updates** (user-triggered only): use `tauri-plugin-updater` to check
+  `https://github.com/wio-ki/Copybook/releases/latest/download/latest.json` (25 s timeout).
+  Cache a newer update after validating that it targets this repository's HTTPS Windows
+  NSIS asset. `install_update` downloads with a 5-minute timeout, publishes cumulative
+  byte progress, and verifies the trusted public-key signature and signed app version.
+  Only complete, verified bytes are staged under `<data>\updates`; the staged file is
+  locked against changes and compared with the verified bytes before Windows executes it.
+  Launch the installer with `/P /UPDATE /R /ARGS --data-dir "<data>" /D=<install-dir>`;
+  NSIS `/D` is last and unquoted. Fresh ordinary restart arguments exclude stale UAC PIDs.
+  Exit through Tauri only after a successful launch so normal hook/clipboard cleanup runs;
+  network, signature or launch failures preserve the running instance and allow retry.
+  NSIS update mode replaces the installed binary without uninstalling or deleting data,
+  then restarts it. No language-selection prompt or browser download is required.
+  Re-checking successfully clears prior error progress. Operation gating rejects concurrent
+  checks/installs; process-wide status survives navigation away from About.
+  Releases include `latest.json`, the NSIS installer and its detached signature. The private
+  signing key is never committed; CI receives it from an encrypted repository secret.
+  Nothing is sent on a timer: only a user click initiates a check or download.
+* **Source visibility** (`showSource`, default true): General → Panel controls app name/icon
+  display in history rows and item details, including existing entries. Timestamps, item
+  metadata, capture, ignored-app selection and stored source information remain available.
 * **Autostart** via `tauri-plugin-autostart` (HKCU Run). Starting at login never shows a window.
-* **Run as administrator**: Preferences → General offers an explicit restart button and shows
-  the current elevation status using `get_app_info`. The button is disabled while the request
-  is pending or already elevated. `restart_as_admin` uses Windows `runas` for the current
+* **Run as administrator**: Preferences → General offers the persistent `runAsAdmin` switch
+  described above and shows the current elevation status using `get_app_info`.
+  `restart_as_admin` uses Windows `runas` for the current
   executable; cancelling UAC leaves the current instance running. The elevated replacement
   waits for the original process to exit before initializing the single-instance plugin,
   database, hooks and shortcuts, then reopens General. The same data directory is carried
-  across the restart (including `COPYBOOK_DATA_DIR` overrides). This applies to this run only;
-  future ordinary launches and login startup retain their usual permissions.
+  across the restart (including `COPYBOOK_DATA_DIR` overrides and updater `--data-dir`
+  arguments). Future launches honor the saved switch, including after an update.
 * **Single instance** via `tauri-plugin-single-instance`: a second launch shows the panel.

@@ -14,6 +14,7 @@ import type {
   SettingsSection,
   Stats,
   UpdateInfo,
+  UpdateProgress,
 } from './contract';
 
 /** Everything the UI may ask of the backend. Mirrors section 5 of docs/contract.md. */
@@ -43,6 +44,8 @@ export interface Backend {
   openDataDir(): Promise<void>;
   getAppInfo(): Promise<AppInfo>;
   checkUpdate(): Promise<UpdateInfo>;
+  installUpdate(): Promise<void>;
+  getUpdateProgress(): Promise<UpdateProgress>;
   restartAsAdmin(): Promise<boolean>;
   on<E extends keyof EventMap>(event: E, handler: (payload: EventMap[E]) => void): Promise<() => void>;
   /** URL for a file under the data dir (images, app icons). */
@@ -112,6 +115,8 @@ async function createTauriBackend(): Promise<Backend> {
     openDataDir: () => call('open_data_dir'),
     getAppInfo: () => call('get_app_info'),
     checkUpdate: () => call('check_update'),
+    installUpdate: () => call('install_update'),
+    getUpdateProgress: () => call('get_update_progress'),
     restartAsAdmin: () => call('restart_as_admin'),
     on: (event, handler) => listen(event, (e) => handler(e.payload as never)),
     assetUrl: (path) => convertFileSrc(path),

@@ -16,7 +16,7 @@ with sqlite3.connect(data_dir / "copybook.db") as db:
     assert db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 defaults = {
-    "language": "system", "theme": "system", "density": "comfortable",
+    "language": "system", "theme": "system", "density": "comfortable", "showSource": True,
     "autostart": False, "runAsAdmin": False, "hotkey": "Alt+KeyV", "winV": False,
     "panelPosition": "cursor", "hideOnBlur": True,
     "autoPaste": True, "pastePlain": False, "moveToTop": True,

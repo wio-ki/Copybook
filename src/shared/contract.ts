@@ -90,6 +90,13 @@ export interface UpdateInfo {
   installer: string | null;
 }
 
+export interface UpdateProgress {
+  stage: 'idle' | 'downloading' | 'installing' | 'error';
+  version: string | null;
+  downloaded: number;
+  total: number | null;
+}
+
 export interface AppInfo {
   version: string;
   dataDir: string;
@@ -109,6 +116,7 @@ export interface Settings {
   language: Language;
   theme: ThemeSetting;
   density: Density;
+  showSource: boolean;
   autostart: boolean;
   runAsAdmin: boolean;
   hotkey: string;
@@ -156,12 +164,14 @@ export interface EventMap {
   'settings://changed': Settings;
   'settings://navigate': { section: SettingsSection };
   'capture://paused': { paused: boolean };
+  'update://progress': UpdateProgress;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   language: 'system',
   theme: 'system',
   density: 'comfortable',
+  showSource: true,
   autostart: false,
   runAsAdmin: false,
   hotkey: 'Alt+KeyV',

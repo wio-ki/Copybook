@@ -77,7 +77,16 @@ pub fn run() {
             return;
         }
     };
+    let update_dir =
+        match elevation::data_dir_argument(&std::env::args_os().skip(1).collect::<Vec<_>>()) {
+            Ok(dir) => dir,
+            Err(e) => {
+                eprintln!("Invalid update restart: {}", e.message);
+                return;
+            }
+        };
     let override_dir = match elevated_dir
+        .or(update_dir)
         .map(std::path::PathBuf::into_os_string)
         .or_else(|| std::env::var_os("COPYBOOK_DATA_DIR"))
     {
@@ -107,6 +116,7 @@ pub fn run() {
         ));
     }
     let result = tauri::Builder::default()
+        .manage(update::State::default())
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             let app = app.clone();
             let handle = app.clone();
@@ -117,6 +127,7 @@ pub fn run() {
             });
         }))
         .plugin(logger.build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(
             tauri_plugin_autostart::Builder::new()
@@ -158,6 +169,8 @@ pub fn run() {
             commands::open_data_dir,
             commands::get_app_info,
             commands::check_update,
+            commands::install_update,
+            commands::get_update_progress,
             commands::restart_as_admin
         ])
         .setup(move |app| {

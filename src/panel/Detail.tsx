@@ -31,6 +31,7 @@ interface DetailProps {
   t: Strings;
   lang: Lang;
   pastePlain: boolean;
+  showSource: boolean;
   onClose: () => void;
   onPaste: (item: ClipItem, invert: boolean) => void;
   onCopy: (item: ClipItem) => void;
@@ -126,12 +127,16 @@ export function Detail(props: DetailProps) {
         <Body item={item} content={content} t={t} lang={lang} />
 
         <dl className="detail-info">
-          <dt>{t.detail.source}</dt>
-          <dd className="info-source">
-            {item.source?.icon && <img className="app-icon" src={assetUrl(item.source.icon)} alt="" />}
-            <span>{item.source ? item.source.name : t.meta.unknownApp}</span>
-            {item.source && <span className="info-dim">{item.source.exe}</span>}
-          </dd>
+          {props.showSource && (
+            <>
+              <dt>{t.detail.source}</dt>
+              <dd className="info-source">
+                {item.source?.icon && <img className="app-icon" src={assetUrl(item.source.icon)} alt="" />}
+                <span>{item.source ? item.source.name : t.meta.unknownApp}</span>
+                {item.source && <span className="info-dim">{item.source.exe}</span>}
+              </dd>
+            </>
+          )}
           <dt>{t.detail.created}</dt>
           <dd className="tnum">{absoluteTime(item.createdAt, lang)}</dd>
           <dt>{t.detail.lastUsed}</dt>

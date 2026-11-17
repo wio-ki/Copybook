@@ -11,6 +11,8 @@ import {
   type SeenApp,
   type Settings,
   type SourceApp,
+  type UpdateInfo,
+  type UpdateProgress,
 } from './contract';
 
 const svg = (body: string, w: number, h: number) =>
@@ -199,9 +201,19 @@ export function createMockBackend(): Backend {
       ? { language: params.get('lang') as 'en-US' | 'zh-CN' }
       : {}),
     ...(params.has('plain') ? { pastePlain: true } : {}),
+    ...(params.get('source') === '0' ? { showSource: false } : {}),
   };
   let paused = params.has('paused');
   let elevated = params.get('admin') === '1';
+  const updateMode = params.get('update');
+  let checkedUpdate: UpdateInfo | null = null;
+  let installAttempts = 0;
+  let updateProgress: UpdateProgress = {
+    stage: updateMode === 'downloading' || updateMode === 'installing' ? updateMode : 'idle',
+    version: updateMode === 'downloading' || updateMode === 'installing' ? '0.2.0' : null,
+    downloaded: updateMode === 'downloading' ? 2 * 1024 * 1024 : 0,
+    total: updateMode === 'downloading' ? 4 * 1024 * 1024 : null,
+  };
   const listeners = new Map<string, Set<(p: unknown) => void>>();
 
   const emit = <E extends keyof EventMap>(event: E, payload: EventMap[E]) => {
@@ -209,6 +221,11 @@ export function createMockBackend(): Backend {
   };
   const changed = (reason: EventMap['history://changed']['reason'], id: number | null) =>
     emit('history://changed', { reason, id });
+  const publishProgress = (value: UpdateProgress) => {
+    updateProgress = value;
+    emit('update://progress', { ...value });
+  };
+  const updating = () => updateProgress.stage === 'downloading' || updateProgress.stage === 'installing';
 
   const find = (id: number) => {
     const item = items.find((i) => i.id === id);
@@ -390,10 +407,13 @@ export function createMockBackend(): Backend {
       elevated = true;
       return delay(true);
     },
-    // Dev-only: `?update=1` offers a newer release, `?update=none` the up-to-date answer.
+    // Dev-only update scenarios: none, check-error, download-error, signature-error,
+    // install-error, unknown (no Content-Length), slow, downloading, installing.
     async checkUpdate() {
-      const newer = new URLSearchParams(location.search).get('update') !== 'none';
-      return delay({
+      if (updating()) throw { code: 'invalid', message: 'Update already in progress' };
+      if (updateMode === 'check-error') throw { code: 'network', message: 'Mock update check failed' };
+      const newer = updateMode !== 'none';
+      checkedUpdate = {
         current: '0.1.0',
         latest: newer ? '0.2.0' : '0.1.0',
         newer,
@@ -401,7 +421,37 @@ export function createMockBackend(): Backend {
         installer: newer
           ? 'https://github.com/wio-ki/Copybook/releases/download/v0.2.0/Copybook_0.2.0_x64-setup.exe'
           : null,
-      });
+      };
+      publishProgress({ stage: 'idle', version: newer ? checkedUpdate.latest : null, downloaded: 0, total: null });
+      return delay({ ...checkedUpdate });
+    },
+    async installUpdate() {
+      if (updating()) throw { code: 'invalid', message: 'Update already in progress' };
+      if (!checkedUpdate?.newer) throw { code: 'invalid', message: 'Check for an update first' };
+      installAttempts += 1;
+      const version = checkedUpdate.latest;
+      const size = 4 * 1024 * 1024;
+      const total = updateMode === 'unknown' ? null : size;
+      publishProgress({ stage: 'downloading', version, downloaded: 0, total });
+      for (let step = 1; step <= 10; step += 1) {
+        await delay(undefined, updateMode === 'slow' ? 700 : 100);
+        const downloaded = Math.floor(size * step / 10);
+        if (updateMode === 'download-error' && installAttempts === 1 && step === 4) {
+          publishProgress({ stage: 'error', version, downloaded, total });
+          throw { code: 'network', message: 'Mock download interrupted' };
+        }
+        publishProgress({ stage: 'downloading', version, downloaded, total });
+      }
+      if ((updateMode === 'signature-error' || updateMode === 'install-error') && installAttempts === 1) {
+        publishProgress({ stage: 'error', version, downloaded: size, total });
+        throw { code: 'io', message: `Mock ${updateMode}` };
+      }
+      // The browser cannot install or restart. Stay in the handoff stage rather than
+      // pretending that the new application version has been installed successfully.
+      publishProgress({ stage: 'installing', version, downloaded: size, total });
+    },
+    async getUpdateProgress() {
+      return delay({ ...updateProgress });
     },
     async on(event, handler) {
       const set = listeners.get(event) ?? new Set();

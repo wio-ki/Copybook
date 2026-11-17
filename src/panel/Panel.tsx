@@ -642,6 +642,7 @@ export function Panel() {
               index={i}
               selected={i === index}
               density={settings.density}
+              showSource={settings.showSource}
               t={t}
               lang={lang}
               now={now}
@@ -662,6 +663,7 @@ export function Panel() {
             t={t}
             lang={lang}
             pastePlain={plainDefault}
+            showSource={settings.showSource}
             onClose={() => {
               setDetailId(null);
               focusSearch();

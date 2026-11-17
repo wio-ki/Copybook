@@ -1,6 +1,7 @@
 import {
   ClipboardPaste,
   Database,
+  Download,
   ExternalLink,
   FolderOpen,
   Info,
@@ -11,10 +12,10 @@ import {
   SlidersHorizontal,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, assetUrl, toCmdError } from '../shared/api';
 import { useApp } from '../shared/app';
-import type { AppInfo, SeenApp, Settings, SettingsSection, Stats, UpdateInfo } from '../shared/contract';
+import type { AppInfo, SeenApp, Settings, SettingsSection, Stats, UpdateInfo, UpdateProgress } from '../shared/contract';
 import { formatBytes, formatNumber } from '../shared/format';
 import { Seal } from '../shared/Seal';
 import { Toast, useToast } from '../shared/Toast';
@@ -236,6 +237,9 @@ function General({ settings, save, notify }: { settings: Settings; save: SaveFn;
       </Group>
 
       <Group title={g.panel}>
+        <Row label={g.showSource} hint={g.showSourceHint} htmlFor="s-source">
+          <Switch id="s-source" checked={settings.showSource} onChange={(showSource) => void save({ showSource })} />
+        </Row>
         <Row label={g.position}>
           <Segmented
             label={g.position}
@@ -543,30 +547,102 @@ function Data() {
 // ---- About ----------------------------------------------------------------------------
 
 function About() {
-  const { t } = useApp();
+  const { t, lang } = useApp();
   const a = t.settings.about;
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [progressReady, setProgressReady] = useState(false);
+  const [progress, setProgress] = useState<UpdateProgress>({ stage: 'idle', version: null, downloaded: 0, total: null });
+  const [failed, setFailed] = useState<'check' | 'install' | null>(null);
+  const mounted = useRef(false);
+  const requestPending = useRef(false);
+  const busy = installing || progress.stage === 'downloading' || progress.stage === 'installing';
+
   useEffect(() => {
-    api.getAppInfo().then(setInfo).catch(() => {});
+    mounted.current = true;
+    let alive = true;
+    let unlisten: (() => void) | undefined;
+    let events = 0;
+    void api.getAppInfo().then((value) => alive && setInfo(value)).catch(() => {});
+    const restoreProgress = async () => {
+      try {
+        const off = await api.on('update://progress', (value) => {
+          if (!alive) return;
+          events += 1;
+          setProgress(value);
+          setProgressReady(true);
+          if (value.stage === 'downloading' || value.stage === 'installing') setFailed(null);
+        });
+        if (!alive) {
+          off();
+          return;
+        }
+        unlisten = off;
+        const revision = events;
+        const value = await api.getUpdateProgress();
+        if (alive && events === revision) setProgress(value);
+      } catch {
+        if (alive) setFailed('check');
+      } finally {
+        if (alive) setProgressReady(true);
+      }
+    };
+    void restoreProgress();
+    return () => {
+      alive = false;
+      mounted.current = false;
+      unlisten?.();
+    };
   }, []);
 
   const check = async () => {
-    if (checking) return;
+    if (requestPending.current || busy || !progressReady) return;
+    requestPending.current = true;
     setChecking(true);
-    setFailed(false);
+    setFailed(null);
     try {
-      setUpdate(await api.checkUpdate());
+      const value = await api.checkUpdate();
+      if (mounted.current) {
+        setUpdate(value);
+        setProgress((previous) => previous.stage === 'error' ? { ...previous, stage: 'idle' } : previous);
+      }
     } catch {
-      setUpdate(null);
-      setFailed(true);
+      if (mounted.current) {
+        setUpdate(null);
+        setFailed('check');
+      }
     } finally {
-      setChecking(false);
+      requestPending.current = false;
+      if (mounted.current) setChecking(false);
     }
   };
 
+  const install = async () => {
+    if (requestPending.current || busy || !progressReady || !update?.newer) return;
+    requestPending.current = true;
+    setInstalling(true);
+    setFailed(null);
+    try {
+      // Windows closes Copybook only after the verified updater starts. Do not show a
+      // success state here: returning from this call does not prove installation finished.
+      await api.installUpdate();
+    } catch {
+      if (mounted.current) {
+        setFailed('install');
+        setProgress((previous) => ({ ...previous, stage: 'error' }));
+      }
+    } finally {
+      requestPending.current = false;
+      if (mounted.current) setInstalling(false);
+    }
+  };
+
+  const total = progress.total != null && progress.total > 0 ? progress.total : null;
+  const percent = total == null ? null : Math.min(100, Math.floor(progress.downloaded / total * 100));
+  const installFailed = failed === 'install' || progress.stage === 'error';
+  const downloadText = `${formatBytes(progress.downloaded, lang)}${total == null ? '' : ` / ${formatBytes(total, lang)}`}`;
   const links: [string, string][] = [
     [a.repo, REPO],
     [a.issues, `${REPO}/issues`],
@@ -581,29 +657,43 @@ function About() {
       <p className="about-tagline">{a.tagline}</p>
       {info?.elevated && <p className="about-badge">{a.elevated}</p>}
       <div className="about-update">
-        <button type="button" className="btn" onClick={() => void check()} disabled={checking}>
+        <button type="button" className="btn" onClick={() => void check()} disabled={checking || busy || !progressReady}>
           <RefreshCw size={14} strokeWidth={1.75} aria-hidden="true" className={checking ? 'is-spinning' : ''} />
           {checking ? a.checking : a.check}
         </button>
-        {failed && (
+        {failed === 'check' && (
           <p className="about-update-note is-error" role="status">
             {a.updateFailed}
           </p>
         )}
-        {update &&
+        {update && !busy &&
           (update.newer ? (
-            <p className="about-update-note" role="status">
-              {a.available(update.latest)}
-              <button type="button" className="link" onClick={() => void api.openUrl(update.installer ?? update.url)}>
-                {update.installer ? a.download : a.releasePage}
-                <ExternalLink size={12} strokeWidth={1.75} aria-hidden="true" />
+            <div className="about-update-available">
+              <p className="about-update-note" role="status">{a.available(update.latest)}</p>
+              <p className="about-update-note is-quiet">{a.installHint}</p>
+              <button type="button" className="btn btn--primary" onClick={() => void install()} disabled={checking || !progressReady}>
+                <Download size={14} strokeWidth={1.75} aria-hidden="true" />
+                {installFailed ? a.retryInstall : a.install}
               </button>
-            </p>
+            </div>
           ) : (
             <p className="about-update-note is-quiet" role="status">
               {a.upToDate}
             </p>
           ))}
+        {busy && (
+          <div className="about-update-progress" role="status" aria-live="polite">
+            <p className="about-update-note">{progress.stage === 'installing' ? a.installing : a.downloading}</p>
+            {progress.version && <p className="about-update-note is-quiet">{a.version(progress.version)}</p>}
+            {progress.stage !== 'installing' && (
+              <>
+                <progress max={100} value={percent ?? undefined} aria-label={a.downloading} />
+                <span className="about-update-note is-quiet tnum">{downloadText}{percent == null ? '' : ` · ${percent}%`}</span>
+              </>
+            )}
+          </div>
+        )}
+        {installFailed && !busy && <p className="about-update-note is-error" role="status">{a.installFailed}</p>}
       </div>
       <ul className="about-links">
         {links.map(([label, url]) => (

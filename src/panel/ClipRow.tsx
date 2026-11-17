@@ -20,6 +20,7 @@ interface RowProps {
   index: number;
   selected: boolean;
   density: Density;
+  showSource: boolean;
   t: Strings;
   lang: Lang;
   now: number;
@@ -32,7 +33,7 @@ interface RowProps {
 const keepFocus = (e: MouseEvent) => e.preventDefault();
 
 export const ClipRow = memo(function ClipRow(props: RowProps) {
-  const { item, index, selected, density, t, lang, now } = props;
+  const { item, index, selected, density, showSource, t, lang, now } = props;
   const compact = density === 'compact';
 
   const openMenu = (e: MouseEvent) => {
@@ -71,7 +72,7 @@ export const ClipRow = memo(function ClipRow(props: RowProps) {
           </p>
         )}
         <Content item={item} compact={compact} t={t} />
-        {!compact && <Meta item={item} t={t} lang={lang} now={now} />}
+        {!compact && <Meta item={item} showSource={showSource} t={t} lang={lang} now={now} />}
       </div>
 
       {compact && (
@@ -204,7 +205,7 @@ function Content({ item, compact, t }: { item: ClipItem; compact: boolean; t: St
   );
 }
 
-function Meta({ item, t, lang, now }: { item: ClipItem; t: Strings; lang: Lang; now: number }) {
+function Meta({ item, showSource, t, lang, now }: { item: ClipItem; showSource: boolean; t: Strings; lang: Lang; now: number }) {
   let extra = '';
   if (item.kind === 'image' && item.image) {
     // Pixels only: the row is narrow, the app name matters more than the file size here.
@@ -226,17 +227,19 @@ function Meta({ item, t, lang, now }: { item: ClipItem; t: Strings; lang: Lang; 
 
   return (
     <div className="row-meta">
-      <span className="meta-source">
-        {item.source?.icon ? (
-          <img className="app-icon" src={assetUrl(item.source.icon)} alt="" draggable={false} />
-        ) : (
-          <span className="app-icon app-icon--blank" aria-hidden="true" />
-        )}
-        <span className="app-name">{item.source?.name ?? t.meta.unknownApp}</span>
-      </span>
-      <span className="meta-sep" aria-hidden="true">
-        ·
-      </span>
+      {showSource && (
+        <>
+          <span className="meta-source">
+            {item.source?.icon ? (
+              <img className="app-icon" src={assetUrl(item.source.icon)} alt="" draggable={false} />
+            ) : (
+              <span className="app-icon app-icon--blank" aria-hidden="true" />
+            )}
+            <span className="app-name">{item.source?.name ?? t.meta.unknownApp}</span>
+          </span>
+          <span className="meta-sep" aria-hidden="true">·</span>
+        </>
+      )}
       <time className="tnum" dateTime={new Date(item.lastUsedAt).toISOString()}>
         {relativeTime(item.lastUsedAt, t, lang, now)}
       </time>

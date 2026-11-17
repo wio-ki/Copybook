@@ -48,7 +48,7 @@ impl Drop for Process {
 
 /// Quote one Windows command-line argument, preserving Unicode, embedded quotes and trailing
 /// backslashes. ShellExecuteEx receives a parameter string rather than an argument array.
-fn quote(value: &OsStr) -> Vec<u16> {
+pub(crate) fn quote(value: &OsStr) -> Vec<u16> {
     let mut out = vec![b'"' as u16];
     let mut slashes = 0;
     for c in value.encode_wide() {
@@ -67,6 +67,30 @@ fn quote(value: &OsStr) -> Vec<u16> {
     out.extend(std::iter::repeat_n(b'\\' as u16, slashes * 2));
     out.push(b'"' as u16);
     out
+}
+
+/// Ordinary restarts after an update carry the data path without replaying a UAC PID.
+pub fn data_dir_argument(args: &[OsString]) -> Result<Option<PathBuf>> {
+    let positions: Vec<_> = args
+        .iter()
+        .enumerate()
+        .filter(|(_, arg)| *arg == "--data-dir")
+        .map(|(i, _)| i)
+        .collect();
+    match positions.as_slice() {
+        [] => Ok(None),
+        [index] => {
+            let dir = args
+                .get(index + 1)
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute())
+                .ok_or_else(|| {
+                    CmdError::invalid("An absolute update data directory is required")
+                })?;
+            Ok(Some(dir))
+        }
+        _ => Err(CmdError::invalid("Duplicate data directory arguments")),
+    }
 }
 
 fn handoff(args: &[OsString]) -> Result<Option<(u32, PathBuf)>> {
@@ -251,5 +275,24 @@ mod tests {
             .unwrap();
         wait_for_exit(child.id()).unwrap();
         assert!(child.try_wait().unwrap().is_some());
+    }
+
+    #[test]
+    fn ordinary_update_restart_preserves_data_without_uac_handoff() {
+        let args = |a: &[&str]| a.iter().map(OsString::from).collect::<Vec<_>>();
+        assert_eq!(
+            data_dir_argument(&args(&["--data-dir", r"C:\用户\Copybook data"])).unwrap(),
+            Some(PathBuf::from(r"C:\用户\Copybook data"))
+        );
+        assert!(data_dir_argument(&args(&["--autostart"]))
+            .unwrap()
+            .is_none());
+        for values in [
+            vec!["--data-dir"],
+            vec!["--data-dir", "relative"],
+            vec!["--data-dir", r"C:\data", "--data-dir", r"D:\data"],
+        ] {
+            assert!(data_dir_argument(&args(&values)).is_err());
+        }
     }
 }
