@@ -51,6 +51,11 @@ export function Panel() {
   const [locked, setLocked] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const { toast, show: showToast, dismiss: dismissToast } = useToast();
+  const changeFilter = (next: ListFilter) => {
+    if (next === filter) return;
+    setFilter(next);
+    setOptions({ ...options, group: next === 'favorite' ? '' : null });
+  };
 
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -334,6 +339,13 @@ export function Panel() {
       return;
     }
 
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const at = FILTERS.indexOf(filter);
+      changeFilter(FILTERS[(at + (e.shiftKey ? -1 : 1) + FILTERS.length) % FILTERS.length]);
+      return;
+    }
+
     if (!item) return;
 
     if (e.key === 'Enter') {
@@ -401,12 +413,6 @@ export function Panel() {
         e.preventDefault();
         move(-pageSize());
         break;
-      case 'Tab': {
-        e.preventDefault();
-        const at = FILTERS.indexOf(filter);
-        setFilter(FILTERS[(at + (e.shiftKey ? -1 : 1) + FILTERS.length) % FILTERS.length]);
-        break;
-      }
       default:
         if (mod && e.key === 'Home') {
           e.preventDefault();
@@ -625,12 +631,7 @@ export function Panel() {
             aria-selected={filter === f}
             className={`tab${filter === f ? ' is-active' : ''}`}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              if (f !== filter) {
-                setFilter(f);
-                setOptions({ ...options, group: f === 'favorite' ? '' : null });
-              }
-            }}
+            onClick={() => changeFilter(f)}
           >
             {t.filters[f]}
           </button>

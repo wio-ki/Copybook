@@ -140,6 +140,10 @@ try {
     await page.waitForFunction(() => document.querySelectorAll('.row').length === 0);
     await page.getByRole('button', { name: '重置', exact: true }).click();
     await page.locator('.row').first().waitFor();
+    await page.locator('.search input').focus();
+    await page.keyboard.press('Tab');
+    await page.waitForFunction(() => document.querySelectorAll('.row').length === 45);
+    assert.equal(await page.getByRole('tab', { name: '全部', exact: true }).getAttribute('aria-selected'), 'true');
     await context.close();
     console.log(
       'Merge: full preview, reverse order, clipboard copy; folders: move and navigate; source/time filters combine',
@@ -169,6 +173,14 @@ try {
     await enter('工作');
     await enter('工作/项目');
     await create('资料');
+    // Empty folders must still permit category switching, clearing the folder scope.
+    await page.waitForFunction(() => document.querySelectorAll('.row').length === 0);
+    await page.locator('.search input').focus();
+    await page.keyboard.press('Tab');
+    await page.waitForFunction(() => document.querySelectorAll('.row').length === 45);
+    await page.keyboard.press('Shift+Tab');
+    await enter('工作');
+    await enter('工作/项目');
     const movedIds = await backend(page, async () => {
       const api = (await import('/src/shared/api.ts')).api;
       const { items } = await api.listItems({ query: '', filter: 'text', offset: 0, limit: 2 });
