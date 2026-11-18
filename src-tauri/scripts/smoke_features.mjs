@@ -70,9 +70,9 @@ try {
       .click({ modifiers: ['Shift'] });
     await page.getByText('已选 3 条', { exact: true }).waitFor();
     const unchecked = page.locator('.row--multi[aria-selected="false"]').first();
-    assert.equal(await unchecked.locator('.selection-bookmark .bookmark-body').count(), 1);
-    assert.equal(await unchecked.locator('.bookmark-check, .stamp').count(), 0);
-    assert.equal(await page.locator('.row--multi[aria-selected="true"] .bookmark-check').count(), 3);
+    assert.equal(await unchecked.locator('.selection-cookie').count(), 1);
+    assert.equal(await unchecked.locator('.cookie-crumbs, .stamp').count(), 0);
+    assert.equal(await page.locator('.row--multi[aria-selected="true"] .cookie-crumbs').count(), 3);
     await page.screenshot({ path: '.review/shots/v140/multiselect.png' });
     await page.locator('.row').nth(3).dblclick();
     assert.equal(await page.evaluate(() => window.__pasteCalls), 0);

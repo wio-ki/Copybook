@@ -1,4 +1,8 @@
-# Copybook — frontend/backend contract (v1.6.2)
+# Copybook — frontend/backend contract (v1.6.3)
+
+## v1.6.3 multi-select
+
+* An unselected row shows a whole chocolate-chip cookie. Selecting the row adds a small, round bite on the upper right and two crumbs. The row exposes the selection state through `aria-selected`.
 
 ## v1.6.2 rolling cloud backup and selection bookmarks
 

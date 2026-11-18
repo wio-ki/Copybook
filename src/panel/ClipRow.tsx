@@ -63,10 +63,7 @@ export const ClipRow = memo(function ClipRow(props: RowProps) {
       onContextMenu={openMenu}
     >
       {props.multi ? (
-        <svg className="selection-bookmark" viewBox="0 0 20 24" aria-hidden="true" focusable="false">
-          <path className="bookmark-body" d="M4 3h12v17l-6-3.8L4 20z" />
-          {selected && <path className="bookmark-check" d="m6.7 9.8 2.2 2.3 4.5-4.7" />}
-        </svg>
+        <SelectionCookie selected={selected} />
       ) : <span className="stamp tnum" aria-hidden="true">{index < 9 ? index + 1 : ''}</span>}
 
       <div className="row-body">
@@ -122,6 +119,28 @@ export const ClipRow = memo(function ClipRow(props: RowProps) {
     </div>
   );
 });
+
+function SelectionCookie({ selected }: { selected: boolean }) {
+  // The two outlines share the same rim up to the shallow bite at the upper right.
+  const rim = 'M40.6 24.3c.2 9.1-6.8 16-16.1 16.4C14.5 41.2 6.7 34.4 6.8 24.3c.2-10 8.2-17.3 17.7-17.2';
+  const edge = selected
+    ? 'C29.83 7.1 34.32 9.57 37.19 13.44a5.6 5.6 0 0 0 3.41 10.5Z'
+    : 'c9.4 0 16.2 7.7 16.1 17.2Z';
+
+  return (
+    <svg className="selection-cookie" viewBox="0 0 48 48" width="22" height="22" aria-hidden="true" focusable="false">
+      <path d={rim + edge} fill={selected ? '#eaae61' : '#dac19e'} stroke="#785037" strokeWidth="1.65" />
+      <path d="M10.1 24.6c0 6.5 4.1 12.1 11.3 13.1" fill="none" stroke="#b58252" strokeWidth="1.45" strokeLinecap="round" />
+      <path fill="#704532" d="m13.3 17.9 2.4-1.2 1.9 1.6-1.1 2.6-2.6-.3zM22.1 10.8l2.4-.5 1.1 1.9-1.9 1.4-2-.8zM13.7 28.3l2.6-1.2 2 2-1.4 2-2.6-.5zM23.4 32l2.5-.7 1.4 2-1.3 1.9-2.4-.6zM21.7 20.6l2.8-1.1 1.8 1.7-1.1 2.4-2.6-.1zM29.5 14.6l2.3-1 1.7 1.7-1.2 2.1-2.3-.6zM31.6 26.6l2-1.2 1.6 1.5-.7 2.1-2.2-.1z" />
+      {selected && (
+        <g className="cookie-crumbs" fill="#e5ae66" stroke="#885a38" strokeWidth=".75">
+          <path d="m40.5 16 1.1-1.15 1.5.67.04 1.4-1.55.5z" />
+          <circle cx="44.9" cy="13.5" r=".7" />
+        </g>
+      )}
+    </svg>
+  );
+}
 
 function Content({ item, compact, t }: { item: ClipItem; compact: boolean; t: Strings }) {
   if (item.kind === 'image' && item.image) {

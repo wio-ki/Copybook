@@ -1,7 +1,7 @@
 {
   "name": "copybook",
   "private": true,
-  "version": "1.6.2",
+  "version": "1.6.3",
   "description": "A keyboard-first clipboard history for Windows.",
   "license": "MIT",
   "type": "module",
