@@ -116,6 +116,13 @@ pub enum ListFilter {
     Url,
     Favorite,
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FavoriteDirection {
+    Up,
+    Down,
+}
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ListQuery {

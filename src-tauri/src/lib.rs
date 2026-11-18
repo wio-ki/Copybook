@@ -1,6 +1,7 @@
 mod backup;
 mod clipboard;
 mod commands;
+mod credentials;
 mod detect;
 mod elevation;
 mod formats;
@@ -160,12 +161,17 @@ pub fn run() {
             commands::copy_merged,
             commands::list_groups,
             commands::create_group,
+            commands::create_snippet,
+            commands::edit_snippet,
+            commands::move_favorite_item,
             commands::set_item_group,
             commands::rename_group,
             commands::webdav_test,
             commands::webdav_list,
             commands::webdav_backup,
             commands::webdav_restore,
+            commands::webdav_password_status,
+            commands::webdav_save_password,
             commands::clear_history,
             commands::get_stats,
             commands::list_seen_apps,

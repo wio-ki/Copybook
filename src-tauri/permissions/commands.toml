@@ -1,4 +1,9 @@
 [[permission]]
 identifier = "allow-copybook"
 description = "Allow the Copybook application command contract"
-commands.allow = ["list_items", "get_item", "get_item_content", "paste_item", "copy_item", "set_favorite", "set_pinned", "set_note", "delete_items", "list_item_ids", "undo_delete", "get_merged_text", "copy_merged", "list_groups", "create_group", "set_item_group", "rename_group", "webdav_test", "webdav_list", "webdav_backup", "webdav_restore", "clear_history", "get_stats", "list_seen_apps", "get_settings", "update_settings", "get_capture_paused", "set_capture_paused", "hide_panel", "set_panel_locked", "open_settings", "open_url", "open_path", "reveal_path", "open_data_dir", "get_app_info", "check_update", "install_update", "get_update_progress", "restart_as_admin"]
+commands.allow = ["list_items", "get_item", "get_item_content", "paste_item", "copy_item", "set_favorite", "set_pinned", "set_note", "delete_items", "list_item_ids", "undo_delete", "get_merged_text", "copy_merged", "list_groups", "create_group", "create_snippet", "edit_snippet", "move_favorite_item", "set_item_group", "rename_group", "clear_history", "get_stats", "list_seen_apps", "get_settings", "update_settings", "get_capture_paused", "set_capture_paused", "hide_panel", "set_panel_locked", "open_settings", "open_url", "open_path", "reveal_path", "open_data_dir", "get_app_info", "check_update", "install_update", "get_update_progress", "restart_as_admin"]
+
+[[permission]]
+identifier = "allow-webdav"
+description = "Allow backup and credential commands in the settings window"
+commands.allow = ["webdav_test", "webdav_list", "webdav_backup", "webdav_restore", "webdav_password_status", "webdav_save_password"]

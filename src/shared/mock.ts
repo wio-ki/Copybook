@@ -267,9 +267,12 @@ export function createMockBackend(): Backend {
     return terms.every((t) => hay.includes(t));
   };
 
-  const ordered = () =>
+  const ranks = new Map<number, number>();
+  const ordered = (folder = false) =>
     [...items].sort(
-      (a, b) => Number(b.pinned) - Number(a.pinned) || b.lastUsedAt - a.lastUsedAt || b.id - a.id,
+      (a, b) => Number(b.pinned) - Number(a.pinned)
+        || (folder ? (ranks.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (ranks.get(b.id) ?? Number.MAX_SAFE_INTEGER) : 0)
+        || b.lastUsedAt - a.lastUsedAt || b.id - a.id,
     );
 
   const bump = (item: ClipItem) => {
@@ -291,7 +294,7 @@ export function createMockBackend(): Backend {
 
   return {
     async listItems(q) {
-      const all = ordered().filter((i) => matches(i, q));
+      const all = ordered(q.group != null).filter((i) => matches(i, q));
       return delay({ items: all.slice(q.offset, q.offset + q.limit).map((i) => ({ ...i })), total: all.length });
     },
     async getItem(id) {
@@ -318,12 +321,16 @@ export function createMockBackend(): Backend {
     async setFavorite(id, value) {
       const item = find(id);
       item.favorite = value;
-      if (!value) item.group = null;
+      if (!value) {
+        item.group = null;
+        ranks.delete(id);
+      }
       changed('updated', id);
       return delay({ ...item });
     },
     async setPinned(id, value) {
       const item = find(id);
+      if (item.pinned !== value) ranks.delete(id);
       item.pinned = value;
       changed('updated', id);
       return delay({ ...item });
@@ -341,7 +348,7 @@ export function createMockBackend(): Backend {
       changed('deleted', ids.length === 1 ? ids[0] : null);
       return delay(before - items.length);
     },
-    async listItemIds(q) { return ordered().filter(i => matches(i,q)).map(i=>i.id); },
+    async listItemIds(q) { return ordered(q.group != null).filter(i => matches(i,q)).map(i=>i.id); },
     async undoDelete() {
       if (!undo || Date.now() >= undo.deadline) return 0;
       const n = undo.items.length; items.push(...undo.items); undo = null; changed('added',null); return n;
@@ -357,12 +364,48 @@ export function createMockBackend(): Backend {
       if (folders.has(name)) throw { code: 'invalid' };
       addFolder(name); changed('updated', null);
     },
+    async createSnippet(group, value) {
+      if (group && !folders.has(group)) throw { code: 'not_found' };
+      const time = Date.now();
+      const item = text(value, null, 0, { text: value, favorite: true, group, createdAt: time, lastUsedAt: time });
+      items.push(item);
+      changed('added', item.id);
+      return { ...item };
+    },
+    async editSnippet(id, value) {
+      const item = find(id);
+      if (item.kind !== 'text' || !item.favorite) throw { code: 'invalid' };
+      if (item.text !== value) {
+        Object.assign(item, {
+          text: value, textLength: [...value].length, lineCount: value.split('\n').length,
+          hasHtml: false, hasRtf: false, source: null, subKind: null,
+        });
+      }
+      changed('updated', id);
+      return { ...item };
+    },
+    async moveFavoriteItem(id, direction) {
+      const item = find(id);
+      if (!item.favorite) throw { code: 'invalid' };
+      const siblings = ordered(true).filter((entry) => entry.favorite && entry.group === item.group && entry.pinned === item.pinned);
+      const from = siblings.indexOf(item);
+      const to = from + (direction === 'up' ? -1 : 1);
+      if (to < 0 || to >= siblings.length) return false;
+      [siblings[from], siblings[to]] = [siblings[to], siblings[from]];
+      siblings.forEach((entry, rank) => ranks.set(entry.id, rank));
+      changed('updated', id);
+      return true;
+    },
     async setItemGroup(ids, group) {
       const path = group?.trim() || null;
       if (path) validateFolder(path);
       const targets = ids.map(find);
       if (path) addFolder(path);
-      targets.forEach((item) => { item.group = path; item.favorite = true; });
+      targets.forEach((item) => {
+        if (item.group !== path) ranks.delete(item.id);
+        item.group = path;
+        item.favorite = true;
+      });
       changed('updated', null); return ids.length;
     },
     async renameGroup(name, replacement) {
@@ -378,6 +421,7 @@ export function createMockBackend(): Backend {
       let n = 0;
       [...items, ...(undo?.items ?? [])].forEach((item) => {
         if (item.group && inFolder(item.group, name)) {
+          if (replacement == null) ranks.delete(item.id);
           item.group = replacement == null ? null : replacement + item.group.slice(name.length); n++;
         }
       });
@@ -386,6 +430,8 @@ export function createMockBackend(): Backend {
     },
     async webdavTest() { throw {code:'network',message:'WebDAV is available in the desktop app'}; },
     async webdavList() { throw {code:'network'}; },
+    async webdavPasswordStatus() { return { access: false, encryption: false }; },
+    async webdavSavePassword() { throw { code: 'io' }; },
     async webdavBackup() { throw {code:'network'}; },
     async webdavRestore() { throw {code:'network'}; },
     async clearHistory(keepMarked) {

@@ -7,6 +7,34 @@ use std::{
 };
 
 const COLUMNS: &str="id,kind,sub_kind,substr(text,1,2000),text_length,line_count,html IS NOT NULL,rtf IS NOT NULL,image_json,paths_json,source_json,favorite,pinned,note,use_count,created_at,last_used_at,group_name";
+const HISTORY_ORDER: &str = "pinned DESC,last_used_at DESC,id DESC";
+const FOLDER_ORDER: &str =
+    "pinned DESC,favorite_order IS NULL,favorite_order,last_used_at DESC,id DESC";
+
+fn order(query: &ListQuery) -> &'static str {
+    if query.group.is_some() {
+        FOLDER_ORDER
+    } else {
+        HISTORY_ORDER
+    }
+}
+
+fn snippet_hash(identity: &str) -> Vec<u8> {
+    // The prefixed identity has a different length than a capture's SHA-256 hash.
+    format!("snippet:{identity}").into_bytes()
+}
+
+pub fn validate_snippet(text: &str) -> Result<()> {
+    if text.len() > 1024 * 1024 {
+        return Err(CmdError::new("too_large", "Snippet exceeds 1 MiB"));
+    }
+    if text.trim().is_empty() || text.contains('\0') {
+        return Err(CmdError::invalid(
+            "Snippet must contain text without NUL characters",
+        ));
+    }
+    Ok(())
+}
 
 pub struct Storage {
     conn: Connection,
@@ -18,6 +46,8 @@ pub struct StoredContent {
     pub text: String,
     pub html: Option<String>,
     pub rtf: Option<Vec<u8>>,
+    pub snippet_id: Option<String>,
+    pub favorite_order: Option<i64>,
 }
 fn json<T: serde::Serialize>(value: &T) -> Result<String> {
     serde_json::to_string(value).map_err(|_| CmdError::internal())
@@ -84,7 +114,7 @@ impl Storage {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         let version: u32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if version > 3 {
+        if version > 4 {
             return Err(CmdError::new(
                 "db",
                 "Database is newer than this application",
@@ -115,6 +145,12 @@ impl Storage {
                 insert_folders(&tx, &path)?;
             }
             tx.pragma_update(None, "user_version", 3)?;
+            tx.commit()?;
+        }
+        if version < 4 {
+            let tx = conn.transaction()?;
+            tx.execute_batch(include_str!("../migrations/004_snippets.sql"))?;
+            tx.pragma_update(None, "user_version", 4)?;
             tx.commit()?;
         }
         let mut storage = Self {
@@ -226,7 +262,10 @@ impl Storage {
         )?;
         args.push(query.limit.into());
         args.push(query.offset.into());
-        let mut stmt=self.conn.prepare(&format!("SELECT {COLUMNS} FROM items WHERE {clause} ORDER BY pinned DESC,last_used_at DESC,id DESC LIMIT ? OFFSET ?"))?;
+        let order = order(&query);
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLUMNS} FROM items WHERE {clause} ORDER BY {order} LIMIT ? OFFSET ?"
+        ))?;
         let items = stmt
             .query_map(params_from_iter(&args), item_row)?
             .collect::<rusqlite::Result<_>>()?;
@@ -244,16 +283,18 @@ impl Storage {
     }
     pub fn content(&self, id: i64) -> Result<StoredContent> {
         let item = self.get(id)?;
-        let (text, html, rtf) =
-            self.conn
-                .query_row("SELECT text,html,rtf FROM items WHERE id=?", [id], |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-                })?;
+        let (text, html, rtf, snippet_id, favorite_order) = self.conn.query_row(
+            "SELECT text,html,rtf,snippet_id,favorite_order FROM items WHERE id=?",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )?;
         Ok(StoredContent {
             item,
             text,
             html,
             rtf,
+            snippet_id,
+            favorite_order,
         })
     }
     pub fn item_content(&self, id: i64, max_chars: i64) -> Result<ItemContent> {
@@ -271,8 +312,8 @@ impl Storage {
     }
     pub fn mark(&self, id: i64, field: &str, value: bool) -> Result<ClipItem> {
         let sql = match field {
-            "favorite" => "UPDATE items SET favorite=?,group_name=CASE WHEN ?1 THEN group_name ELSE NULL END WHERE id=?2 AND deleted_at IS NULL",
-            "pinned" => "UPDATE items SET pinned=? WHERE id=? AND deleted_at IS NULL",
+            "favorite" => "UPDATE items SET favorite=?,group_name=CASE WHEN ?1 THEN group_name ELSE NULL END,favorite_order=CASE WHEN ?1 THEN favorite_order ELSE NULL END WHERE id=?2 AND deleted_at IS NULL",
+            "pinned" => "UPDATE items SET favorite_order=CASE WHEN pinned IS ?1 THEN favorite_order ELSE NULL END,pinned=?1 WHERE id=?2 AND deleted_at IS NULL",
             _ => return Err(CmdError::internal()),
         };
         if self.conn.execute(sql, params![value, id])? == 0 {
@@ -316,7 +357,11 @@ impl Storage {
     }
     pub fn matching_ids(&self, query: &ListQuery) -> Result<Vec<i64>> {
         let (clause, args) = search::clause(query);
-        let ids = self.ids(&format!("SELECT id FROM items WHERE {clause} ORDER BY pinned DESC,last_used_at DESC,id DESC LIMIT 100001"), params_from_iter(args))?;
+        let order = order(query);
+        let ids = self.ids(
+            &format!("SELECT id FROM items WHERE {clause} ORDER BY {order} LIMIT 100001"),
+            params_from_iter(args),
+        )?;
         if ids.len() > 100000 {
             return Err(CmdError::new("too_large", "Too many matching records"));
         }
@@ -414,6 +459,84 @@ impl Storage {
         tx.commit()?;
         Ok(())
     }
+    pub fn create_snippet(&self, group: Option<String>, text: String) -> Result<ClipItem> {
+        validate_snippet(&text)?;
+        let group = group_name(group)?;
+        if let Some(path) = &group {
+            if !folder_exists(&self.conn, path)? {
+                return Err(CmdError::new("not_found", "Folder does not exist"));
+            }
+        }
+        let identity: String =
+            self.conn
+                .query_row("SELECT lower(hex(randomblob(16)))", [], |r| r.get(0))?;
+        self.conn.execute(
+            "INSERT INTO items(kind,hash,sub_kind,text,text_length,line_count,favorite,group_name,created_at,last_used_at,search_text,snippet_id)
+             VALUES('text',?,?,?,?,?,1,?,?7,?7,?,?)",
+            params![snippet_hash(&identity),detect::sub_kind(&text),text,text.chars().count() as u32,text.split('\n').count() as u32,group,now_ms(),text.to_lowercase(),identity],
+        )?;
+        self.get(self.conn.last_insert_rowid())
+    }
+
+    pub fn edit_snippet(&self, id: i64, text: String) -> Result<ClipItem> {
+        validate_snippet(&text)?;
+        let content = self.content(id)?;
+        if !content.item.favorite || content.item.kind != ClipKind::Text {
+            return Err(CmdError::invalid("Only favorite text can be edited"));
+        }
+        if content.text == text {
+            return Ok(content.item);
+        }
+        let identity: String = self.conn.query_row(
+            "SELECT coalesce(snippet_id,lower(hex(randomblob(16)))) FROM items WHERE id=?",
+            [id],
+            |r| r.get(0),
+        )?;
+        let search = format!(
+            "{}\n{}",
+            text.to_lowercase(),
+            content.item.note.as_deref().unwrap_or("").to_lowercase()
+        );
+        self.conn.execute(
+            "UPDATE items SET hash=?,snippet_id=?,sub_kind=?,text=?,text_length=?,line_count=?,html=NULL,rtf=NULL,source_json=NULL,search_text=? WHERE id=?",
+            params![snippet_hash(&identity),identity,detect::sub_kind(&text),text,text.chars().count() as u32,text.split('\n').count() as u32,search,id],
+        )?;
+        self.get(id)
+    }
+
+    pub fn move_favorite(&mut self, id: i64, direction: FavoriteDirection) -> Result<bool> {
+        let item = self.get(id)?;
+        if !item.favorite {
+            return Err(CmdError::invalid("Only favorites can be reordered"));
+        }
+        let mut ids = self.ids(
+            &format!("SELECT id FROM items WHERE favorite=1 AND deleted_at IS NULL AND coalesce(group_name,'')=? AND pinned=? ORDER BY {FOLDER_ORDER}"),
+            params![item.group.as_deref().unwrap_or(""),item.pinned],
+        )?;
+        let index = ids
+            .iter()
+            .position(|&candidate| candidate == id)
+            .ok_or_else(CmdError::internal)?;
+        let neighbor = match direction {
+            FavoriteDirection::Up => index.checked_sub(1),
+            FavoriteDirection::Down => (index + 1 < ids.len()).then_some(index + 1),
+        };
+        let Some(neighbor) = neighbor else {
+            return Ok(false);
+        };
+        ids.swap(index, neighbor);
+        let tx = self.conn.transaction()?;
+        {
+            let mut update = tx.prepare(
+                "UPDATE items SET favorite_order=? WHERE id=? AND favorite_order IS NOT ?1",
+            )?;
+            for (rank, id) in ids.into_iter().enumerate() {
+                update.execute(params![rank as i64, id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(true)
+    }
     pub fn set_group(&mut self, ids: &[i64], group: Option<String>) -> Result<usize> {
         validate_ids(ids, 100000)?;
         let group = group_name(group)?;
@@ -432,7 +555,7 @@ impl Storage {
                 return Err(CmdError::new("not_found", "Item does not exist"));
             }
             count += tx.execute(
-                "UPDATE items SET group_name=?,favorite=1 WHERE id=?2",
+                "UPDATE items SET favorite_order=CASE WHEN group_name IS ?1 THEN favorite_order ELSE NULL END,group_name=?1,favorite=1 WHERE id=?2",
                 params![group, id],
             )?;
         }
@@ -481,7 +604,7 @@ impl Storage {
                 .map(|r| format!("{r}{}", &path[name.len()..]));
             // Include tombstones so undo cannot restore a stale path.
             count += tx.execute(
-                "UPDATE items SET group_name=? WHERE group_name=?",
+                "UPDATE items SET group_name=?1,favorite_order=CASE WHEN ?1 IS NULL THEN NULL ELSE favorite_order END WHERE group_name=?2",
                 params![target, path],
             )?;
             tx.execute("DELETE FROM favorite_folders WHERE path=?", [path])?;
@@ -632,7 +755,11 @@ impl Storage {
                 } else {
                     hash.update(text.as_bytes());
                 }
-                let hash = hash.finalize().to_vec();
+                let hash = r
+                    .snippet_id
+                    .as_deref()
+                    .map(snippet_hash)
+                    .unwrap_or_else(|| hash.finalize().to_vec());
                 let exists: bool = tx.query_row(
                     "SELECT EXISTS(SELECT 1 FROM items WHERE kind=? AND hash=?)",
                     params![r.kind.as_str(), hash],
@@ -658,8 +785,8 @@ impl Storage {
                     text.to_lowercase(),
                     r.note.as_deref().unwrap_or("").to_lowercase()
                 );
-                tx.execute("INSERT INTO items(kind,hash,sub_kind,text,text_length,line_count,html,rtf,paths_json,source_json,favorite,pinned,note,group_name,use_count,created_at,last_used_at,search_text) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    params![r.kind.as_str(),hash,sub,text,text.chars().count() as u32,if text.is_empty(){0}else{text.split('\n').count() as u32},r.html,prepared.rtf,paths,source,r.favorite||r.group.is_some(),r.pinned,r.note,r.group,r.use_count,r.created_at,r.last_used_at,search])?;
+                tx.execute("INSERT INTO items(kind,hash,sub_kind,text,text_length,line_count,html,rtf,paths_json,source_json,favorite,pinned,note,group_name,use_count,created_at,last_used_at,search_text,snippet_id,favorite_order) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    params![r.kind.as_str(),hash,sub,text,text.chars().count() as u32,if text.is_empty(){0}else{text.split('\n').count() as u32},r.html,prepared.rtf,paths,source,r.favorite||r.group.is_some(),r.pinned,r.note,r.group,r.use_count,r.created_at,r.last_used_at,search,r.snippet_id,r.favorite_order])?;
                 if let Some(pixels) = prepared.pixels {
                     let id = tx.last_insert_rowid();
                     let path = self.dir.join("images").join(format!("{id}.png"));
@@ -933,7 +1060,7 @@ mod tests {
         let (dir, db, s) = setup();
         // Simulate a released v2 database, whose group names could contain literal '/'.
         db.conn
-            .execute_batch("DROP TABLE favorite_folders; PRAGMA user_version=2;")
+            .execute_batch("DROP TABLE favorite_folders; DROP INDEX favorite_folder_order; ALTER TABLE items DROP COLUMN snippet_id; ALTER TABLE items DROP COLUMN favorite_order; PRAGMA user_version=2;")
             .unwrap();
         db.conn.execute("INSERT INTO items(kind,hash,text,text_length,line_count,group_name,favorite,created_at,last_used_at,search_text) VALUES('text',X'01','legacy',6,1,'旧/名称',1,0,0,'legacy')", []).unwrap();
         drop(db);
@@ -964,6 +1091,75 @@ mod tests {
             .restore_records(vec![], vec!["valid".into(), "bad//path".into()])
             .is_err());
         assert_eq!(target.groups().unwrap(), before);
+    }
+    #[test]
+    fn favorite_snippets_keep_content_identity_and_folder_order_through_restore() {
+        let (dir, mut db, settings) = setup();
+        let group = "Replies/Support";
+        db.create_group(group.into()).unwrap();
+        let mut capture = Capture::text("original clipboard text");
+        capture.html = Some("<b>original clipboard text</b>".into());
+        capture.rtf = Some(b"rtf".to_vec());
+        let (captured, _) = db.ingest(capture.clone(), &settings).unwrap();
+        db.set_group(&[captured], Some(group.into())).unwrap();
+        db.note(captured, Some("searchable annotation".into()))
+            .unwrap();
+        let value = "  更新后的片段\nsecond line  ";
+        let edited = db.edit_snippet(captured, value.into()).unwrap();
+        assert_eq!(edited.id, captured);
+        assert_eq!(edited.group.as_deref(), Some(group));
+        assert!(!edited.has_html && !edited.has_rtf);
+        assert_eq!(edited.line_count, 2);
+        assert_eq!(db.content(captured).unwrap().text, value);
+        assert_ne!(db.ingest(capture, &settings).unwrap().0, captured);
+        let duplicate = db.create_snippet(Some(group.into()), value.into()).unwrap();
+        assert_ne!(captured, duplicate.id);
+        let mut folder = query("", ListFilter::Favorite, 0, 10);
+        folder.group = Some(group.into());
+        assert_eq!(
+            db.matching_ids(&folder).unwrap(),
+            vec![duplicate.id, captured]
+        );
+        assert!(db.move_favorite(captured, FavoriteDirection::Up).unwrap());
+        assert!(!db.move_favorite(captured, FavoriteDirection::Up).unwrap());
+        db.bump(duplicate.id, true).unwrap();
+        assert_eq!(
+            db.matching_ids(&folder).unwrap(),
+            vec![captured, duplicate.id]
+        );
+        folder.query = "更新 annotation".into();
+        assert_eq!(db.matching_ids(&folder).unwrap(), vec![captured]);
+        folder.query.clear();
+        drop(db);
+
+        let db = Storage::open(dir.path()).unwrap();
+        assert_eq!(
+            db.matching_ids(&folder).unwrap(),
+            vec![captured, duplicate.id]
+        );
+        let archive = crate::backup::snapshot(&db, settings).unwrap();
+        let serialized = serde_json::to_vec(&archive).unwrap();
+        let (_destination, mut restored, _) = setup();
+        for imported in [3, 0] {
+            let archive: crate::backup::Archive = serde_json::from_slice(&serialized).unwrap();
+            let result = restored
+                .restore_records(
+                    crate::backup::prepare(archive.records).unwrap(),
+                    archive.folders.unwrap(),
+                )
+                .unwrap();
+            assert_eq!(result.imported, imported);
+        }
+        let items = restored.list(folder).unwrap().items;
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].note.as_deref(), Some("searchable annotation"));
+        assert_eq!(restored.content(items[1].id).unwrap().text, value);
+        restored.set_group(&[items[1].id], None).unwrap();
+        assert_eq!(restored.content(items[1].id).unwrap().favorite_order, None);
+        assert!(restored
+            .create_snippet(Some("Missing".into()), "test".into())
+            .is_err());
+        assert!(restored.edit_snippet(items[0].id, "   ".into()).is_err());
     }
     #[test]
     fn image_undo_expiry_recapture_and_restart() {

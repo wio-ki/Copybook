@@ -25,12 +25,13 @@ Copybook 常驻托盘，记下你复制的文字、富文本、图片和文件�
 - **整理**：收藏、置顶、给记录写备注（以朱红色批注显示）。
 - **批量操作**：Ctrl / Shift 多选、全选完整筛选结果、批量删除，15 秒内可撤销；多条文字按自选分隔符合并复制。
 - **筛选与文件夹**：关键词、类型、来源应用、起止日期组合筛选；收藏支持多级文件夹、空目录和面包屑导航，直接在目录中重命名、移动或移除文件夹，单条或批量移动收藏。
-- **加密备份**：「偏好设置 → 数据」通过 WebDAV 备份与合并恢复，默认使用 `copybook/` 子目录；历史、图片和设置在本机用密码加密后上传，密码不会保存。详见 [v1.4.0 说明](docs/releases/v1.4.0.md) 与 [v1.4.1 修复](docs/releases/v1.4.1.md)。
+- **常用片段**：在收藏目录中新建或编辑文本，右键可移至其他目录、在当前目录上移或下移。目录顺序会保留，置顶项优先。
+- **加密备份**：「偏好设置 → 数据」通过 WebDAV 备份与合并恢复，默认使用 `copybook/` 子目录。历史、图片和设置在本机加密后上传。WebDAV 登录密码和备份加密密码可分别记住，保存在当前用户的 Windows 凭据管理器中。详见 [v1.6.0 说明](docs/releases/v1.6.0.md)。
 - **来源**：可在「偏好设置 → 通用 → 面板」中关闭来源应用的名称和图标显示。
 - **粘贴**：<kbd>Enter</kbd> 粘贴，<kbd>Shift</kbd>+<kbd>Enter</kbd> 换一种格式（纯文本 / 原格式），
   <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd> 直接粘贴前九条。
 - **隐私**：遵从密码管理器的"不要记录"标记，跳过私钥、访问令牌和 JWT，可以忽略指定程序；
-  所有数据只存在本机。
+  历史默认保存在本机，主动创建的 WebDAV 备份会以加密形式上传。
 - **其他**：可选接管 <kbd>Win</kbd>+<kbd>V</kbd>，开机自启，浅色 / 深色，宽松 / 紧凑两种密度，中文 / English。
 
 ## 面板快捷键
@@ -48,6 +49,8 @@ Copybook 常驻托盘，记下你复制的文字、富文本、图片和文件�
 | <kbd>Tab</kbd> | 切换分类 |
 | <kbd>Esc</kbd> | 退出多选 / 清空搜索 / 返回上级收藏目录 / 关闭面板 |
 | <kbd>F2</kbd> | 文件夹按钮获得焦点时重命名 |
+| <kbd>Ctrl</kbd>+<kbd>N</kbd> / <kbd>Ctrl</kbd>+<kbd>E</kbd> | 新建 / 编辑收藏片段 |
+| <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>Alt</kbd>+<kbd>↓</kbd> | 在当前收藏目录上移 / 下移选中项 |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | 偏好设置 |
 
 ## 安装
@@ -111,12 +114,15 @@ Highlights: full-text search that also works for one or two Chinese characters; 
 images, files, links and starred items; stars, pins and notes; <kbd>Shift</kbd>+<kbd>Enter</kbd>
 for plain text; <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>1</kbd>–<kbd>9</kbd> quick paste; respects password-manager
 "do not record" hints and skips keys and tokens; optional <kbd>Win</kbd>+<kbd>V</kbd> takeover;
-light and dark themes; Chinese and English UI. Everything stays on your computer.
+light and dark themes; Chinese and English UI. History is stored locally and WebDAV uploads
+are encrypted.
 
 Favorites supports persistent nested folders, including empty directories, with breadcrumbs
 and an All favorites view. Rename (F2), move or remove folders from their directory menu;
 move individual items or a selection using Move to folder. Removing folders keeps their items
-starred at the root. Encrypted WebDAV backups preserve the folder hierarchy and empty folders.
+starred at the root. Create or edit text snippets and reorder items in each folder. Encrypted
+WebDAV backups preserve the hierarchy, empty folders, snippets and custom order. Settings → Data
+can remember the WebDAV and encryption passwords in Windows Credential Manager for the current user.
 
 Source app names/icons can be hidden in Preferences → General → Panel. From v1.3.0,
 Preferences → About downloads and verifies signed updates, installs over the existing app

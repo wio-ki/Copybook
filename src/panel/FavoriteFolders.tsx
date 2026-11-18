@@ -1,4 +1,4 @@
-import { ChevronRight, Folder, FolderPlus, MoreHorizontal, Pencil, FolderInput, Trash2 } from 'lucide-react';
+import { ChevronRight, FilePlus, Folder, FolderPlus, MoreHorizontal, Pencil, FolderInput, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { api, toCmdError } from '../shared/api';
 import { useApp } from '../shared/app';
@@ -10,12 +10,13 @@ export const folderLabel = (path: string) => path.slice(path.lastIndexOf('/') + 
 export const insideFolder = (path: string, parent: string) => path === parent || path.startsWith(parent + '/');
 const join = (parent: string, name: string) => parent ? `${parent}/${name}` : name;
 
-export function FavoriteFolders({ groups, current, navigate, notify, refresh }: {
+export function FavoriteFolders({ groups, current, navigate, notify, refresh, newSnippet }: {
   groups: string[];
   current: string | null;
   navigate: (path: string | null) => void;
   notify: (message: string) => void;
   refresh: () => Promise<void>;
+  newSnippet: () => void;
 }) {
   const { lang, t } = useApp();
   const zh = lang === 'zh-CN';
@@ -80,6 +81,10 @@ export function FavoriteFolders({ groups, current, navigate, notify, refresh }: 
               onClick={() => navigate(parts.slice(0, i + 1).join('/'))}>{part}</button>
           </span>)}
         </nav>
+        <button type="button" className="icon-btn" aria-label={zh ? '新建片段' : 'New snippet'}
+          title={zh ? '新建片段（Ctrl+N）' : 'New snippet (Ctrl+N)'} onClick={newSnippet}>
+          <FilePlus size={16} />
+        </button>
         <button type="button" className="icon-btn" aria-label={zh ? '新建文件夹' : 'New folder'}
           title={zh ? '新建文件夹' : 'New folder'} onClick={() => open('create', current ?? '')}>
           <FolderPlus size={16} />

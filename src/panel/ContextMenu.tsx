@@ -40,6 +40,9 @@ export function ContextMenu({
     setPos({ left, top });
     el.focus();
   }, [x, y]);
+  useLayoutEffect(() => {
+    ref.current?.querySelector('.menu-item.is-active')?.scrollIntoView({ block: 'nearest' });
+  }, [active]);
 
   const runAt = (i: number) => {
     const action = actions[i];

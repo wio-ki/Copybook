@@ -1,4 +1,6 @@
 import {
+  ArrowDown,
+  ArrowUp,
   ClipboardPaste,
   Copy,
   ExternalLink,
@@ -6,6 +8,7 @@ import {
   Info,
   Lock,
   LockOpen,
+  Pencil,
   Pin,
   PinOff,
   Search,
@@ -18,7 +21,7 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api, toCmdError } from '../shared/api';
 import { useApp } from '../shared/app';
-import type { ClipItem, ListFilter, HistoryOptions } from '../shared/contract';
+import type { ClipItem, FavoriteDirection, ListFilter, HistoryOptions } from '../shared/contract';
 import { formatNumber } from '../shared/format';
 import { hotkeyParts } from '../shared/hotkey';
 import { Toast, useToast } from '../shared/Toast';
@@ -29,6 +32,7 @@ import { EmptyState } from './EmptyState';
 import { useHistory } from './useHistory';
 import { useOrganizer } from './Organizer';
 import { FavoriteFolders, folderParent } from './FavoriteFolders';
+import { SnippetEditor, type SnippetDraft } from './SnippetEditor';
 
 const FILTERS: ListFilter[] = ['all', 'text', 'image', 'files', 'url', 'favorite'];
 
@@ -40,6 +44,7 @@ interface MenuState {
 
 export function Panel() {
   const { settings, t, lang } = useApp();
+  const zh = lang === 'zh-CN';
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ListFilter>('all');
   const [options, setOptions] = useState<HistoryOptions>({});
@@ -47,6 +52,8 @@ export function Panel() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const [snippet, setSnippet] = useState<SnippetDraft | null>(null);
+  const movingFavorite = useRef(false);
   const [paused, setPaused] = useState(false);
   const [locked, setLocked] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -71,6 +78,31 @@ export function Panel() {
   const organizer = useOrganizer({ items, query, filter, options, setOptions, focusId: selected?.id ?? null, setFocus: setSelectedId, refresh, notify: showToast });
   const focusSearch = useCallback(() => inputRef.current?.focus(), []);
   const errorText = useCallback((e: unknown) => t.errors[toCmdError(e).code] ?? t.toast.failed, [t]);
+  const canReorder = filter === 'favorite' && options.group != null && !query.trim()
+    && !options.sourceExe && options.since == null && options.until == null;
+  const canEditSnippet = (item: ClipItem) => filter === 'favorite' && item.favorite && item.kind === 'text'
+    && (options.group == null || options.group === (item.group ?? ''));
+  const newSnippet = () => setSnippet({ group: options.group || null });
+  const closeSnippet = () => {
+    setSnippet(null);
+    requestAnimationFrame(focusSearch);
+  };
+  const moveFavorite = async (item: ClipItem, direction: FavoriteDirection) => {
+    if (movingFavorite.current || !canReorder || options.group !== (item.group ?? '') || !item.favorite) return;
+    movingFavorite.current = true;
+    try {
+      if (await api.moveFavoriteItem(item.id, direction)) {
+        setSelectedId(item.id);
+        await refresh();
+      } else {
+        showToast(zh ? '已到当前排序范围的边界' : 'No more items in this pin group');
+      }
+    } catch (e) {
+      showToast(errorText(e));
+    } finally {
+      movingFavorite.current = false;
+    }
+  };
 
   // ---- backend events -------------------------------------------------------------------
 
@@ -91,6 +123,7 @@ export function Panel() {
         setSelectedId(null);
         setDetailId(null);
         setMenu(null);
+        setSnippet(null);
         dismissToast();
         setLocked(isLocked);
         setNow(Date.now());
@@ -305,7 +338,7 @@ export function Panel() {
 
   const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
   onKey.current = (e: KeyboardEvent) => {
-    if (e.isComposing || e.keyCode === 229 || menu || clearing) return;
+    if (e.isComposing || e.keyCode === 229 || menu || clearing || snippet) return;
     if ((e.target as HTMLElement | null)?.closest('.favorite-folders')) return;
     if (organizer.onKey(e)) return;
     if ((e.target as HTMLElement | null)?.closest('.organizer-tools, .selection-bar, .advanced-filters, .undo-bar')) return;
@@ -336,6 +369,24 @@ export function Panel() {
     if (mod && e.key === ',') {
       e.preventDefault();
       void api.openSettings(null);
+      return;
+    }
+
+    if (mod && !e.altKey && !e.shiftKey && filter === 'favorite') {
+      if (e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        newSnippet();
+        return;
+      }
+      if (e.key.toLowerCase() === 'e' && item && canEditSnippet(item)) {
+        e.preventDefault();
+        setSnippet({ item });
+        return;
+      }
+    }
+    if (e.altKey && !mod && !e.shiftKey && canReorder && selected && ['ArrowUp', 'ArrowDown'].includes(e.key)) {
+      e.preventDefault();
+      void moveFavorite(selected, e.key === 'ArrowUp' ? 'up' : 'down');
       return;
     }
 
@@ -453,6 +504,16 @@ export function Panel() {
       });
     }
     entries.push({ id: 'copy', label: t.actions.copy, icon: Copy, keys: ['Ctrl+C'], run: () => void copy(item) });
+    if (canEditSnippet(item)) {
+      entries.push({ id: 'edit-snippet', label: zh ? '编辑片段' : 'Edit snippet', icon: Pencil, keys: ['Ctrl+E'],
+        run: () => setSnippet({ item }) });
+    }
+    if (canReorder && item.favorite && options.group === (item.group ?? '')) {
+      entries.push(
+        { id: 'move-up', label: zh ? '上移' : 'Move up', icon: ArrowUp, keys: ['Alt+↑'], run: () => void moveFavorite(item, 'up') },
+        { id: 'move-down', label: zh ? '下移' : 'Move down', icon: ArrowDown, keys: ['Alt+↓'], run: () => void moveFavorite(item, 'down') },
+      );
+    }
     entries.push('separator');
     entries.push({
       id: 'fav',
@@ -643,7 +704,7 @@ export function Panel() {
         <div ref={listRef} className="list">
           {filter === 'favorite' && <FavoriteFolders groups={organizer.groups} current={options.group ?? null}
             navigate={(group) => { setOptions({ ...options, group }); setDetailId(null); setMenu(null); }}
-            notify={showToast} refresh={refresh} />}
+            notify={showToast} refresh={refresh} newSnippet={newSnippet} />}
           <div id="clip-list" role="listbox" tabIndex={0} aria-multiselectable={organizer.mode} aria-label={t.filters[filter]}>
           {items.map((item, i) => (
             <ClipRow
@@ -725,6 +786,13 @@ export function Panel() {
       </footer>
 
       {organizer.dialogs}
+      {snippet && <SnippetEditor draft={snippet} onClose={closeSnippet} onSaved={(item) => {
+        patch(item.id, item);
+        setSelectedId(item.id);
+        closeSnippet();
+        void refresh();
+        showToast(zh ? '片段已保存' : 'Snippet saved');
+      }} />}
       {menu && <ContextMenu x={menu.x} y={menu.y} entries={menuEntries(menu.item)} onClose={closeMenu} />}
     </div>
   );

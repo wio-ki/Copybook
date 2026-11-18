@@ -1,4 +1,32 @@
-# Copybook — frontend/backend contract (v1.5.0)
+# Copybook — frontend/backend contract (v1.6.0)
+
+## v1.6 snippets, folder order and device credentials (take precedence below)
+
+* `create_snippet({ group, text }) -> ClipItem` creates a plain-text favorite in an
+  existing folder or at the root (`null`). `edit_snippet({ id, text }) -> ClipItem`
+  edits any favorite text record in place. Text must be nonblank, contain no NUL,
+  and fit in 1 MiB of UTF-8. Whitespace is preserved. An edit that changes the text
+  clears the old rich formats and source. Manually created and edited text has an
+  independent identity from clipboard captures, even when their text matches.
+* `move_favorite_item({ id, direction }) -> boolean` moves a favorite one place
+  `up` or `down` among active items with the same folder and pin state, returning
+  false at the boundary. Manual order applies to exact-folder queries (including
+  the root), after pinned status. All other views keep their existing order. Moving
+  an item to a different folder, changing its pin state or unfavoriting it resets
+  its manual position.
+* Backup records may carry `snippetId` and `favoriteOrder`. Older archives remain
+  readable. Restore deduplicates by snippet identity or clipboard content as
+  appropriate and keeps the local version when a record already exists.
+* `webdav_password_status({ connection }) -> { access, encryption }` returns two
+  booleans. `webdav_save_password({ connection, kind, value }) -> void` stores
+  `access` or `encryption` in Windows Credential Manager for the current Windows
+  user on this device. A null value removes that password. Each entry is bound
+  to the validated base WebDAV URL and exact username. Passwords are opt-in,
+  never returned to the UI and never included in an archive. Access passwords
+  are 1–2560 UTF-8 bytes. Existing encryption limits apply.
+* When `connection.password` is empty, WebDAV commands use the saved access
+  password if present. When the backup or restore `password` is empty, they
+  use the saved encryption password if present. Explicit values take precedence.
 
 ## v1.5 favorite folders (take precedence below)
 

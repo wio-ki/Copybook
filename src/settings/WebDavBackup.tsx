@@ -1,8 +1,8 @@
 import { CloudUpload, Download, RefreshCw, ShieldCheck } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, inTauri, toCmdError } from '../shared/api';
 import { useApp } from '../shared/app';
-import type { BackupEntry, WebDavConnection } from '../shared/contract';
+import type { BackupEntry, WebDavConnection, WebDavPasswordKind, WebDavPasswordStatus } from '../shared/contract';
 import { formatBytes } from '../shared/format';
 import { FeatureDialog } from '../shared/FeatureDialog';
 import { Group } from './controls';
@@ -33,16 +33,40 @@ export function WebDavBackup() {
   const [status, setStatus] = useState('');
   const [restoring, setRestoring] = useState(false);
   const [restoreSettings, setRestoreSettings] = useState(false);
-  const valid = !!connection.url.trim() && !!connection.username.trim() && !!connection.password;
+  const [stored, setStored] = useState<{ key: string; passwords: WebDavPasswordStatus } | null>(null);
+  const statusRequest = useRef(0);
+  const { url, username } = connection;
+  const accountKey = JSON.stringify([url, username]);
+  const hasAccount = !!url.trim() && !!username.trim();
+  const saved = stored?.key === accountKey ? stored.passwords : null;
+  const valid = hasAccount && (!!connection.password || !!saved?.access);
+  const passwordBytes = new TextEncoder().encode(password).length;
   const validPassword =
-    new TextEncoder().encode(password).length >= 8 && new TextEncoder().encode(password).length <= 1024;
+    password ? passwordBytes >= 8 && passwordBytes <= 1024 : !!saved?.encryption;
+  const passwordConfirmed = validPassword && password === confirmation;
+  useEffect(() => {
+    if (!inTauri || !hasAccount) return;
+    const request = ++statusRequest.current;
+    void api.webdavPasswordStatus({ url, username, password: '' }).then((passwords) => {
+      if (request === statusRequest.current) setStored({ key: accountKey, passwords });
+    }).catch(() => {
+      if (request === statusRequest.current) setStored(null);
+    });
+    return () => { statusRequest.current++; };
+  }, [accountKey, hasAccount, url, username]);
+
   const change = (key: keyof WebDavConnection, value: string) => {
-    setConnection((c) => ({ ...c, [key]: value }));
-    setEntries(null);
-    setSelected('');
+    setConnection((c) => key === 'password' ? { ...c, password: value } : { ...c, [key]: value, password: '' });
+    if (key !== 'password') {
+      setStored(null);
+      setEntries(null);
+      setSelected('');
+      setPassword('');
+      setConfirmation('');
+    }
     setStatus('');
   };
-  const run = async (label: string, action: () => Promise<string>) => {
+  const run = async (label: string, action: () => Promise<string>, clearEncryption = false) => {
     if (busy) return;
     setBusy(label);
     setStatus('');
@@ -64,10 +88,37 @@ export function WebDavBackup() {
       setStatus(t.errors[toCmdError(e).code]);
     } finally {
       setBusy('');
-      setPassword('');
-      setConfirmation('');
+      if (clearEncryption) {
+        setPassword('');
+        setConfirmation('');
+      }
     }
   };
+  const storePassword = (kind: WebDavPasswordKind, value: string | null) =>
+    run(zh ? '正在更新本机凭据…' : 'Updating local credentials…', async () => {
+      await api.webdavSavePassword({ url, username, password: '' }, kind, value);
+      const request = ++statusRequest.current;
+      setStored((previous) => ({
+        key: accountKey,
+        passwords: {
+          access: false,
+          encryption: false,
+          ...(previous?.key === accountKey ? previous.passwords : {}),
+          [kind]: value !== null,
+        },
+      }));
+      void api.webdavPasswordStatus({ url, username, password: '' }).then((passwords) => {
+        if (request === statusRequest.current) setStored({ key: accountKey, passwords });
+      }).catch(() => {});
+      if (kind === 'access') setConnection((c) => ({ ...c, password: '' }));
+      else {
+        setPassword('');
+        setConfirmation('');
+      }
+      return value === null
+        ? (zh ? '已移除本机保存的密码' : 'Removed the saved password')
+        : (zh ? '密码已保存到 Windows 凭据管理器' : 'Password saved in Windows Credential Manager');
+    });
   const refresh = () =>
     run(zh ? '正在读取备份…' : 'Reading backups…', async () => {
       const list = await api.webdavList(connection);
@@ -120,14 +171,15 @@ export function WebDavBackup() {
               type="password"
               value={connection.password}
               onChange={(e) => change('password', e.target.value)}
+              placeholder={saved?.access ? (zh ? '已保存，留空自动使用' : 'Saved. Leave blank to use it.') : undefined}
               autoComplete="off"
             />
           </label>
         </fieldset>
         <p className="backup-hint">
           {zh
-            ? '备份自动存放在 copybook/ 子目录。仅在本机记住地址和用户名，密码不会保存。远程连接使用 HTTPS，本机测试支持 HTTP。'
-            : 'Backups use the copybook/ subfolder automatically. Only URL and username are remembered; passwords are never saved. HTTPS is required remotely; loopback HTTP is supported.'}
+            ? '备份自动存放在 copybook/ 子目录。密码可选保存在当前 Windows 用户的凭据管理器中。远程连接使用 HTTPS，本机测试支持 HTTP。'
+            : 'Backups use the copybook/ subfolder. You can save passwords in Windows Credential Manager for this Windows user. HTTPS is required remotely. Loopback HTTP is supported.'}
         </p>
         <div className="backup-actions">
           <button
@@ -146,6 +198,14 @@ export function WebDavBackup() {
             <RefreshCw size={14} />
             {zh ? '读取云端备份' : 'List cloud backups'}
           </button>
+          <button className="btn" disabled={!!busy || !hasAccount || !connection.password || !inTauri}
+            onClick={() => void storePassword('access', connection.password)}>
+            {zh ? '记住 WebDAV 密码' : 'Remember WebDAV password'}
+          </button>
+          {saved?.access && <button className="btn btn--quiet" disabled={!!busy}
+            onClick={() => void storePassword('access', null)}>
+            {zh ? '忘记 WebDAV 密码' : 'Forget WebDAV password'}
+          </button>}
         </div>
         <fieldset disabled={!!busy} className="backup-fields">
           <label>
@@ -154,11 +214,12 @@ export function WebDavBackup() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              placeholder={saved?.encryption ? (zh ? '已保存，留空自动使用' : 'Saved. Leave blank to use it.') : undefined}
               autoComplete="new-password"
             />
           </label>
           <label>
-            {zh ? '确认密码（创建备份时填写）' : 'Confirm password (for new backups)'}
+            {zh ? '确认密码（使用或保存新密码时填写）' : 'Confirm password (when using or saving a new password)'}
             <input
               type="password"
               value={confirmation}
@@ -172,16 +233,26 @@ export function WebDavBackup() {
             ? '使用 AES-256-GCM 与 Argon2id。恢复时需要原备份密码，遗失后无法找回。文件记录只备份路径，不上传其指向的文件。'
             : 'Uses AES-256-GCM and Argon2id. Keep your backup password: it cannot be recovered. File records include paths; referenced files are not uploaded.'}
         </p>
+        <div className="backup-actions">
+          <button className="btn" disabled={!!busy || !hasAccount || !password || !passwordConfirmed || !inTauri}
+            onClick={() => void storePassword('encryption', password)}>
+            {zh ? '记住备份密码' : 'Remember backup password'}
+          </button>
+          {saved?.encryption && <button className="btn btn--quiet" disabled={!!busy}
+            onClick={() => void storePassword('encryption', null)}>
+            {zh ? '忘记备份密码' : 'Forget backup password'}
+          </button>}
+        </div>
         <button
           className="btn btn--primary"
-          disabled={!!busy || !valid || !validPassword || password !== confirmation || !inTauri}
+          disabled={!!busy || !valid || !passwordConfirmed || !inTauri}
           onClick={() =>
             void run(zh ? '正在加密并上传…' : 'Encrypting and uploading…', async () => {
               const entry = await api.webdavBackup(connection, password);
               setEntries((current) => [entry, ...(current ?? [])]);
               setSelected(entryKey(entry));
               return zh ? '加密备份已上传' : 'Encrypted backup uploaded';
-            })
+            }, true)
           }
         >
           <CloudUpload size={15} />
@@ -272,6 +343,7 @@ export function WebDavBackup() {
                               : '; preferences could not be restored; check local storage permissions')
                         : summary;
                     },
+                    true,
                   );
                 }}
               >

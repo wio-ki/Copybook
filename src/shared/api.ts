@@ -1,6 +1,7 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import type {
   AppInfo, BackupEntry, RestoreResult, WebDavConnection,
+  FavoriteDirection, WebDavPasswordKind, WebDavPasswordStatus,
   ClipItem,
   CmdError,
   ErrorCode,
@@ -34,10 +35,15 @@ export interface Backend {
   copyMerged(ids: number[], separator: string): Promise<void>;
   listGroups(): Promise<string[]>;
   createGroup(name: string): Promise<void>;
+  createSnippet(group: string | null, text: string): Promise<ClipItem>;
+  editSnippet(id: number, text: string): Promise<ClipItem>;
+  moveFavoriteItem(id: number, direction: FavoriteDirection): Promise<boolean>;
   setItemGroup(ids: number[], group: string | null): Promise<number>;
   renameGroup(name: string, replacement: string | null): Promise<number>;
   webdavTest(connection: WebDavConnection): Promise<void>;
   webdavList(connection: WebDavConnection): Promise<BackupEntry[]>;
+  webdavPasswordStatus(connection: WebDavConnection): Promise<WebDavPasswordStatus>;
+  webdavSavePassword(connection: WebDavConnection, kind: WebDavPasswordKind, value: string | null): Promise<void>;
   webdavBackup(connection: WebDavConnection, password: string): Promise<BackupEntry>;
   webdavRestore(connection: WebDavConnection, name: string, password: string, restoreSettings: boolean, legacy?: boolean): Promise<RestoreResult>;
   clearHistory(keepMarked: boolean): Promise<number>;
@@ -118,10 +124,15 @@ async function createTauriBackend(): Promise<Backend> {
     copyMerged: (ids, separator) => call('copy_merged', { ids, separator }),
     listGroups: () => call('list_groups'),
     createGroup: (name) => call('create_group', { name }),
+    createSnippet: (group, text) => call('create_snippet', { group, text }),
+    editSnippet: (id, text) => call('edit_snippet', { id, text }),
+    moveFavoriteItem: (id, direction) => call('move_favorite_item', { id, direction }),
     setItemGroup: (ids, group) => call('set_item_group', { ids, group }),
     renameGroup: (name, replacement) => call('rename_group', { name, replacement }),
     webdavTest: (connection) => call('webdav_test', { connection }),
     webdavList: (connection) => call('webdav_list', { connection }),
+    webdavPasswordStatus: (connection) => call('webdav_password_status', { connection }),
+    webdavSavePassword: (connection, kind, value) => call('webdav_save_password', { connection, kind, value }),
     webdavBackup: (connection, password) => call('webdav_backup', { connection, password }),
     webdavRestore: (connection, name, password, restoreSettings, legacy = false) => call('webdav_restore', { connection, name, password, restoreSettings, legacy }),
     clearHistory: (keepMarked) => call('clear_history', { keepMarked }),

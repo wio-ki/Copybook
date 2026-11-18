@@ -80,6 +80,10 @@ pub struct Record {
     pub use_count: i64,
     pub created_at: i64,
     pub last_used_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snippet_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub favorite_order: Option<i64>,
 }
 pub struct PreparedRecord {
     pub record: Record,
@@ -231,6 +235,17 @@ pub fn prepare(records: Vec<Record>) -> Result<Vec<PreparedRecord>> {
         .into_iter()
         .map(|mut record| {
             record.group = crate::storage::group_name(record.group)?;
+            if let Some(id) = &record.snippet_id {
+                if record.kind != ClipKind::Text
+                    || id.len() != 32
+                    || !id
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                {
+                    return Err(invalid());
+                }
+                crate::storage::validate_snippet(&record.text)?;
+            }
             if record.text.len() > 5_000_000
                 || record
                     .note
@@ -239,6 +254,9 @@ pub fn prepare(records: Vec<Record>) -> Result<Vec<PreparedRecord>> {
                 || record.created_at < 0
                 || record.last_used_at < 0
                 || record.use_count < 0
+                || record
+                    .favorite_order
+                    .is_some_and(|rank| rank < 0 || !record.favorite)
                 || record.paths.len() > 10000
             {
                 return Err(invalid());
@@ -337,6 +355,8 @@ pub fn snapshot(db: &Storage, settings: Settings) -> Result<Archive> {
             use_count: item.use_count,
             created_at: item.created_at,
             last_used_at: item.last_used_at,
+            snippet_id: content.snippet_id,
+            favorite_order: content.favorite_order,
         });
     }
     Ok(Archive {
@@ -370,7 +390,7 @@ fn checked(response: Response) -> Result<Response> {
         _ => Err(network()),
     }
 }
-fn base_endpoint(connection: &Connection) -> Result<Url> {
+pub(crate) fn base_endpoint(connection: &Connection) -> Result<Url> {
     let mut url =
         Url::parse(connection.url.trim()).map_err(|_| CmdError::invalid("Invalid WebDAV URL"))?;
     let loopback = url

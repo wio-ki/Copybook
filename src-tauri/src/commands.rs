@@ -1,6 +1,7 @@
 use crate::{model::*, platform, settings::Settings, shell, state::AppState, window};
 use std::{path::Path, sync::atomic::Ordering};
 use tauri::{AppHandle, Manager};
+use zeroize::Zeroizing;
 
 async fn blocking<T: Send + 'static>(
     app: AppHandle,
@@ -134,6 +135,47 @@ pub async fn create_group(app: AppHandle, name: String) -> Result<()> {
     .await
 }
 #[tauri::command]
+pub async fn create_snippet(
+    app: AppHandle,
+    group: Option<String>,
+    text: String,
+) -> Result<ClipItem> {
+    blocking(app, move |a| {
+        let item = a
+            .state::<AppState>()
+            .db(|db| db.create_snippet(group, text))?;
+        shell::changed(a, "added", Some(item.id));
+        Ok(item)
+    })
+    .await
+}
+#[tauri::command]
+pub async fn edit_snippet(app: AppHandle, id: i64, text: String) -> Result<ClipItem> {
+    blocking(app, move |a| {
+        let item = a.state::<AppState>().db(|db| db.edit_snippet(id, text))?;
+        shell::changed(a, "updated", Some(id));
+        Ok(item)
+    })
+    .await
+}
+#[tauri::command]
+pub async fn move_favorite_item(
+    app: AppHandle,
+    id: i64,
+    direction: FavoriteDirection,
+) -> Result<bool> {
+    blocking(app, move |a| {
+        let moved = a
+            .state::<AppState>()
+            .db(|db| db.move_favorite(id, direction))?;
+        if moved {
+            shell::changed(a, "updated", Some(id));
+        }
+        Ok(moved)
+    })
+    .await
+}
+#[tauri::command]
 pub async fn set_item_group(app: AppHandle, ids: Vec<i64>, group: Option<String>) -> Result<usize> {
     blocking(app, move |a| {
         let count = a.state::<AppState>().db(|db| db.set_group(&ids, group))?;
@@ -159,14 +201,40 @@ pub async fn rename_group(
 }
 #[tauri::command]
 pub async fn webdav_test(app: AppHandle, connection: crate::backup::Connection) -> Result<()> {
-    blocking(app, move |_| crate::backup::test_connection(&connection)).await
+    blocking(app, move |_| {
+        crate::backup::test_connection(&crate::credentials::resolve_connection(connection)?)
+    })
+    .await
 }
 #[tauri::command]
 pub async fn webdav_list(
     app: AppHandle,
     connection: crate::backup::Connection,
 ) -> Result<Vec<crate::backup::BackupEntry>> {
-    blocking(app, move |_| crate::backup::list(&connection)).await
+    blocking(app, move |_| {
+        crate::backup::list(&crate::credentials::resolve_connection(connection)?)
+    })
+    .await
+}
+#[tauri::command]
+pub async fn webdav_password_status(
+    app: AppHandle,
+    connection: crate::backup::Connection,
+) -> Result<crate::credentials::PasswordStatus> {
+    blocking(app, move |_| crate::credentials::status(&connection)).await
+}
+#[tauri::command]
+pub async fn webdav_save_password(
+    app: AppHandle,
+    connection: crate::backup::Connection,
+    kind: crate::credentials::PasswordKind,
+    value: Option<String>,
+) -> Result<()> {
+    let value = value.map(Zeroizing::new);
+    blocking(app, move |_| {
+        crate::credentials::save(&connection, kind, value)
+    })
+    .await
 }
 #[tauri::command]
 pub async fn webdav_backup(
@@ -174,11 +242,13 @@ pub async fn webdav_backup(
     connection: crate::backup::Connection,
     password: String,
 ) -> Result<crate::backup::BackupEntry> {
-    let password = zeroize::Zeroizing::new(password);
+    let password = Zeroizing::new(password);
     blocking(app, move |a| {
         let _gate = crate::backup::GATE
             .try_lock()
             .map_err(|_| CmdError::invalid("A backup or restore is already running"))?;
+        let connection = crate::credentials::resolve_connection(connection)?;
+        let password = crate::credentials::resolve_encryption(&connection, password)?;
         let state = a.state::<AppState>();
         let settings = state.settings()?;
         let archive = state.db(|db| crate::backup::snapshot(db, settings))?;
@@ -195,11 +265,13 @@ pub async fn webdav_restore(
     restore_settings: bool,
     legacy: Option<bool>,
 ) -> Result<crate::backup::RestoreResult> {
-    let password = zeroize::Zeroizing::new(password);
+    let password = Zeroizing::new(password);
     blocking(app, move |a| {
         let _gate = crate::backup::GATE
             .try_lock()
             .map_err(|_| CmdError::invalid("A backup or restore is already running"))?;
+        let connection = crate::credentials::resolve_connection(connection)?;
+        let password = crate::credentials::resolve_encryption(&connection, password)?;
         let archive =
             crate::backup::download(&connection, &name, &password, legacy.unwrap_or(false))?;
         let records = crate::backup::prepare(archive.records)?;

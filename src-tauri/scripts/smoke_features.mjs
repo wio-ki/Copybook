@@ -32,7 +32,7 @@ const browser = await chromium.launch({ channel: 'msedge', headless: true, args:
 const errors = [];
 mkdirSync('.review/shots/v140', { recursive: true });
 mkdirSync('.review/shots/v150', { recursive: true });
-async function open(url, viewport = { width: 384, height: 576 }) {
+async function open(url, viewport = { width: 384, height: 576 }, prepare) {
   const context = await browser.newContext({
     viewport,
     locale: 'zh-CN',
@@ -40,6 +40,7 @@ async function open(url, viewport = { width: 384, height: 576 }) {
   });
   const page = await context.newPage();
   page.on('pageerror', (e) => errors.push(String(e)));
+  await prepare?.(page);
   await page.goto(base + url, { waitUntil: 'domcontentloaded', timeout: 90000 });
   await page.locator('.panel, .settings').waitFor({ timeout: 90000 });
   return { context, page };
@@ -234,6 +235,45 @@ try {
     await context.close();
     console.log('Folders: create empty folders, three levels, breadcrumbs, batch moves, subtree rename/move/remove preserve favorites');
   }
+  {
+    const { context, page } = await open('/panel.html?lang=zh-CN&empty=1', { width: 320, height: 420 });
+    await backend(page, async () => {
+      const api = (await import('/src/shared/api.ts')).api;
+      await api.createGroup('常用/回复');
+    });
+    await page.getByRole('tab', { name: '收藏', exact: true }).click();
+    await page.locator('[data-folder="常用"] .folder-open').click();
+    await page.locator('[data-folder="常用/回复"] .folder-open').click();
+    const editor = page.getByRole('dialog');
+    const snippet = editor.getByRole('textbox', { name: '片段内容' });
+    await page.getByRole('button', { name: '新建片段', exact: true }).click();
+    await snippet.fill('第一条常用回复');
+    await snippet.press('Control+Enter');
+    await page.getByText('第一条常用回复', { exact: true }).waitFor();
+    await page.locator('.search input').focus();
+    await page.keyboard.press('Control+n');
+    await snippet.fill('第二条常用回复');
+    await editor.getByRole('button', { name: '保存', exact: true }).click();
+    await page.getByText('第二条常用回复', { exact: true }).waitFor();
+    await page.locator('.row').filter({ hasText: '第一条常用回复' }).click({ button: 'right' });
+    await page.getByRole('menuitem', { name: '编辑片段', exact: false }).click();
+    assert.equal(await snippet.inputValue(), '第一条常用回复');
+    await snippet.fill('第一条已编辑');
+    await editor.getByRole('button', { name: '保存', exact: true }).click();
+    await page.getByText('第一条已编辑', { exact: true }).waitFor();
+    await page.locator('.search input').focus();
+    await page.keyboard.press('Alt+ArrowUp');
+    await page.waitForFunction(() => document.querySelector('.row')?.textContent.includes('第一条已编辑'));
+    await page.getByRole('button', { name: '返回上一级', exact: true }).click();
+    await page.locator('[data-folder="常用/回复"] .folder-open').click();
+    await page.waitForFunction(() => document.querySelector('.row')?.textContent.includes('第一条已编辑'));
+    await page.locator('.row').first().click({ button: 'right' });
+    await page.getByRole('menuitem', { name: '下移', exact: false }).click();
+    await page.waitForFunction(() => document.querySelector('.row')?.textContent.includes('第二条常用回复'));
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    await context.close();
+    console.log('Favorite snippets: create in a nested folder, edit, reorder by shortcut and menu, keep order on re-entry');
+  }
   for (const lang of ['zh-CN', 'en-US']) {
     for (const width of [320, 384, 480]) {
       const { context, page } = await open(`/panel.html?lang=${lang}`, { width, height: 576 });
@@ -271,8 +311,60 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     await context.close();
   }
+  {
+    const vault = new Map();
+    const uploads = [];
+    const { context, page } = await open('/settings.html#data', { width: 760, height: 650 }, async (page) => {
+      await page.exposeFunction('testTauriInvoke', (cmd, args) => {
+        const connection = args?.connection;
+        const key = (kind) => JSON.stringify([connection.url, connection.username, kind]);
+        switch (cmd) {
+          case 'plugin:event|listen': return 1;
+          case 'plugin:event|unlisten': return;
+          case 'webdav_password_status': return { access: vault.has(key('access')), encryption: vault.has(key('encryption')) };
+          case 'webdav_save_password':
+            assert.equal(connection.password, '');
+            if (args.value === null) vault.delete(key(args.kind));
+            else vault.set(key(args.kind), args.value);
+            return;
+          case 'webdav_backup':
+            assert.ok(vault.has(key('access')) && vault.has(key('encryption')));
+            uploads.push([connection.password, args.password]);
+            return { name: 'copybook-fixture.cpbk', bytes: 42, legacy: false };
+          default: throw { code: 'internal' };
+        }
+      });
+      await page.addInitScript(() => {
+        window.__TAURI_INTERNALS__ = { invoke: window.testTauriInvoke, transformCallback: () => 1 };
+        window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
+      });
+    });
+    const fields = page.locator('.backup-fields input');
+    await fields.nth(0).fill('https://example.invalid/dav/');
+    await fields.nth(1).fill('fixture-user');
+    await fields.nth(2).fill('fixture-access');
+    await page.getByRole('button', { name: '记住 WebDAV 密码', exact: true }).click();
+    await page.getByRole('button', { name: '忘记 WebDAV 密码', exact: true }).waitFor();
+    await fields.nth(3).fill('fixture-encryption');
+    await fields.nth(4).fill('fixture-encryption');
+    await page.getByRole('button', { name: '记住备份密码', exact: true }).click();
+    await page.getByRole('button', { name: '忘记备份密码', exact: true }).waitFor();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: '忘记备份密码', exact: true }).waitFor();
+    for (const field of await page.locator('.webdav-backup input[type=password]').all()) {
+      assert.equal(await field.inputValue(), '');
+    }
+    await page.getByRole('button', { name: '创建加密备份', exact: true }).click();
+    await page.getByText('加密备份已上传', { exact: true }).waitFor();
+    assert.deepEqual(uploads, [['', '']]);
+    assert.ok(!(await page.evaluate(() => localStorage.getItem('copybook.webdav'))).includes('fixture-access'));
+    await page.getByRole('button', { name: '忘记备份密码', exact: true }).click();
+    await page.getByRole('button', { name: '忘记备份密码', exact: true }).waitFor({ state: 'hidden' });
+    assert.ok(await page.getByRole('button', { name: '创建加密备份', exact: true }).isDisabled());
+    await context.close();
+  }
   assert.deepEqual(errors, []);
-  console.log('WebDAV UI: bilingual layout, masked passwords, no secret persistence; no browser errors');
+  console.log('WebDAV UI: bilingual layout, remember/forget flow, saved passwords reused with blank fields and absent from browser storage');
 } finally {
   await browser.close();
   server?.kill();

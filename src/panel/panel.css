@@ -935,6 +935,8 @@ li.file-more {
   position: fixed;
   z-index: 11;
   min-width: 208px;
+  max-height: calc(100vh - 12px);
+  overflow-y: auto;
   padding: var(--s-1);
   border: 1px solid var(--rule);
   border-radius: var(--r-3);
