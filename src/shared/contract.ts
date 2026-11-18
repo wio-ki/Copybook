@@ -206,5 +206,6 @@ export type FavoriteDirection = 'up' | 'down';
 export type WebDavPasswordKind = 'access' | 'encryption';
 export type WebDavPasswordStatus = Record<WebDavPasswordKind, boolean>;
 export interface BackupEntry { name: string; bytes: number | null; legacy: boolean }
+export type CreatedBackup = BackupEntry & { passwordSaved: boolean | null };
 export interface RestoreResult { imported: number; skipped: number; settingsRestored: boolean | null }
 export type HistoryOptions = Pick<ListQuery, 'sourceExe' | 'since' | 'until' | 'group'>;

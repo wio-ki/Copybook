@@ -26,7 +26,7 @@ Copybook 常驻托盘，记下你复制的文字、富文本、图片和文件�
 - **批量操作**：Ctrl / Shift 多选、全选完整筛选结果、批量删除，15 秒内可撤销；多条文字按自选分隔符合并复制。
 - **筛选与文件夹**：关键词、类型、来源应用、起止日期组合筛选；收藏支持多级文件夹、空目录和面包屑导航，直接在目录中重命名、移动或移除文件夹，单条或批量移动收藏。
 - **常用片段**：在收藏目录中新建或编辑文本，右键可移至其他目录、在当前目录上移或下移。目录顺序会保留，置顶项优先。
-- **加密备份**：「偏好设置 → 数据」通过 WebDAV 备份与合并恢复，默认使用 `copybook/` 子目录。历史、图片和设置在本机加密后上传。WebDAV 登录密码和备份加密密码可分别记住，保存在当前用户的 Windows 凭据管理器中。详见 [v1.6.0 说明](docs/releases/v1.6.0.md)。
+- **加密备份**：「偏好设置 → 数据」通过 WebDAV 备份与合并恢复，默认使用 `copybook/` 子目录。登录密码可手动记住。使用新加密密码成功备份后，Copybook 会将其自动保存到当前用户的 Windows 凭据管理器，下次可留空。详见 [v1.6.1 说明](docs/releases/v1.6.1.md)。
 - **来源**：可在「偏好设置 → 通用 → 面板」中关闭来源应用的名称和图标显示。
 - **粘贴**：<kbd>Enter</kbd> 粘贴，<kbd>Shift</kbd>+<kbd>Enter</kbd> 换一种格式（纯文本 / 原格式），
   <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd> 直接粘贴前九条。
@@ -122,7 +122,8 @@ and an All favorites view. Rename (F2), move or remove folders from their direct
 move individual items or a selection using Move to folder. Removing folders keeps their items
 starred at the root. Create or edit text snippets and reorder items in each folder. Encrypted
 WebDAV backups preserve the hierarchy, empty folders, snippets and custom order. Settings → Data
-can remember the WebDAV and encryption passwords in Windows Credential Manager for the current user.
+can remember the WebDAV login password. A successful upload also remembers the new encryption
+password in Windows Credential Manager for the current user.
 
 Source app names/icons can be hidden in Preferences → General → Panel. From v1.3.0,
 Preferences → About downloads and verifies signed updates, installs over the existing app

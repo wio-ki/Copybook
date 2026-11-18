@@ -258,7 +258,7 @@
     color var(--t-1) var(--ease-out);
 }
 
-.stamp:empty {
+.row:not(.row--multi) .stamp:empty {
   border-color: transparent;
 }
 

@@ -241,18 +241,17 @@ pub async fn webdav_backup(
     app: AppHandle,
     connection: crate::backup::Connection,
     password: String,
-) -> Result<crate::backup::BackupEntry> {
+) -> Result<crate::backup::CreatedBackup> {
     let password = Zeroizing::new(password);
     blocking(app, move |a| {
         let _gate = crate::backup::GATE
             .try_lock()
             .map_err(|_| CmdError::invalid("A backup or restore is already running"))?;
         let connection = crate::credentials::resolve_connection(connection)?;
-        let password = crate::credentials::resolve_encryption(&connection, password)?;
         let state = a.state::<AppState>();
         let settings = state.settings()?;
         let archive = state.db(|db| crate::backup::snapshot(db, settings))?;
-        crate::backup::upload(&connection, &archive, &password)
+        crate::backup::create(&connection, &archive, password)
     })
     .await
 }

@@ -69,6 +69,13 @@ try {
       .nth(2)
       .click({ modifiers: ['Shift'] });
     await page.getByText('已选 3 条', { exact: true }).waitFor();
+    const unchecked = await page.locator('.row--multi[aria-selected="false"] .stamp').first().evaluate((stamp) => ({
+      glyph: stamp.textContent,
+      border: getComputedStyle(stamp).borderTopColor,
+    }));
+    assert.equal(unchecked.glyph, '');
+    assert.notEqual(unchecked.border, 'rgba(0, 0, 0, 0)');
+    assert.equal(await page.locator('.row--multi[aria-selected="true"] .stamp').first().textContent(), '✓');
     await page.locator('.row').nth(3).dblclick();
     assert.equal(await page.evaluate(() => window.__pasteCalls), 0);
     await page.locator('.selection-bar').getByRole('button', { name: '全选结果', exact: true }).click();
@@ -328,9 +335,11 @@ try {
             else vault.set(key(args.kind), args.value);
             return;
           case 'webdav_backup':
-            assert.ok(vault.has(key('access')) && vault.has(key('encryption')));
+            assert.ok(vault.has(key('access')));
+            if (args.password) vault.set(key('encryption'), args.password);
+            else assert.ok(vault.has(key('encryption')));
             uploads.push([connection.password, args.password]);
-            return { name: 'copybook-fixture.cpbk', bytes: 42, legacy: false };
+            return { name: `copybook-fixture-${uploads.length}.cpbk`, bytes: 42, legacy: false, passwordSaved: args.password ? true : null };
           default: throw { code: 'internal' };
         }
       });
@@ -347,7 +356,8 @@ try {
     await page.getByRole('button', { name: '忘记 WebDAV 密码', exact: true }).waitFor();
     await fields.nth(3).fill('fixture-encryption');
     await fields.nth(4).fill('fixture-encryption');
-    await page.getByRole('button', { name: '记住备份密码', exact: true }).click();
+    await page.getByRole('button', { name: '创建加密备份', exact: true }).click();
+    await page.getByText('加密备份已上传，密码已保存在本机', { exact: true }).waitFor();
     await page.getByRole('button', { name: '忘记备份密码', exact: true }).waitFor();
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: '忘记备份密码', exact: true }).waitFor();
@@ -356,15 +366,16 @@ try {
     }
     await page.getByRole('button', { name: '创建加密备份', exact: true }).click();
     await page.getByText('加密备份已上传', { exact: true }).waitFor();
-    assert.deepEqual(uploads, [['', '']]);
-    assert.ok(!(await page.evaluate(() => localStorage.getItem('copybook.webdav'))).includes('fixture-access'));
+    assert.deepEqual(uploads, [['', 'fixture-encryption'], ['', '']]);
+    const browserStorage = await page.evaluate(() => localStorage.getItem('copybook.webdav') ?? '');
+    assert.ok(!browserStorage.includes('fixture-access') && !browserStorage.includes('fixture-encryption'));
     await page.getByRole('button', { name: '忘记备份密码', exact: true }).click();
     await page.getByRole('button', { name: '忘记备份密码', exact: true }).waitFor({ state: 'hidden' });
     assert.ok(await page.getByRole('button', { name: '创建加密备份', exact: true }).isDisabled());
     await context.close();
   }
   assert.deepEqual(errors, []);
-  console.log('WebDAV UI: bilingual layout, remember/forget flow, saved passwords reused with blank fields and absent from browser storage');
+  console.log('WebDAV UI: automatic password save after upload, blank-field reuse after reload, forget, and no passwords in browser storage');
 } finally {
   await browser.close();
   server?.kill();

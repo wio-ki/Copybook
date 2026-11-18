@@ -63,7 +63,7 @@ export const ClipRow = memo(function ClipRow(props: RowProps) {
       onContextMenu={openMenu}
     >
       <span className="stamp tnum" aria-hidden="true">
-        {props.multi ? (selected ? '✓' : '□') : index < 9 ? index + 1 : ''}
+        {props.multi ? (selected ? '✓' : null) : index < 9 ? index + 1 : ''}
       </span>
 
       <div className="row-body">

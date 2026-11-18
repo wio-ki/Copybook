@@ -1,6 +1,6 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import type {
-  AppInfo, BackupEntry, RestoreResult, WebDavConnection,
+  AppInfo, BackupEntry, CreatedBackup, RestoreResult, WebDavConnection,
   FavoriteDirection, WebDavPasswordKind, WebDavPasswordStatus,
   ClipItem,
   CmdError,
@@ -44,7 +44,7 @@ export interface Backend {
   webdavList(connection: WebDavConnection): Promise<BackupEntry[]>;
   webdavPasswordStatus(connection: WebDavConnection): Promise<WebDavPasswordStatus>;
   webdavSavePassword(connection: WebDavConnection, kind: WebDavPasswordKind, value: string | null): Promise<void>;
-  webdavBackup(connection: WebDavConnection, password: string): Promise<BackupEntry>;
+  webdavBackup(connection: WebDavConnection, password: string): Promise<CreatedBackup>;
   webdavRestore(connection: WebDavConnection, name: string, password: string, restoreSettings: boolean, legacy?: boolean): Promise<RestoreResult>;
   clearHistory(keepMarked: boolean): Promise<number>;
   getStats(): Promise<Stats>;

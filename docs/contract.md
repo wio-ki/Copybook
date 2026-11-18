@@ -1,4 +1,14 @@
-# Copybook — frontend/backend contract (v1.6.0)
+# Copybook — frontend/backend contract (v1.6.1)
+
+## v1.6.1 backup password and multi-select
+
+* `webdav_backup` returns the existing `BackupEntry` fields plus `passwordSaved`.
+  After a successful upload using an explicitly supplied encryption password,
+  save that password in the same Windows credential slot used by manual saving.
+  Return `true` when saved, `false` when the upload succeeded but saving failed,
+  and `null` when an existing credential was reused. Failed uploads and all restores
+  leave the saved password alone. The user can still forget it.
+* Multi-select uses one visible box per row, with a tick when selected.
 
 ## v1.6 snippets, folder order and device credentials (take precedence below)
 
@@ -21,8 +31,8 @@
   booleans. `webdav_save_password({ connection, kind, value }) -> void` stores
   `access` or `encryption` in Windows Credential Manager for the current Windows
   user on this device. A null value removes that password. Each entry is bound
-  to the validated base WebDAV URL and exact username. Passwords are opt-in,
-  never returned to the UI and never included in an archive. Access passwords
+  to the validated base WebDAV URL and exact username. Passwords are never
+  returned to the UI and never included in an archive. Access passwords
   are 1–2560 UTF-8 bytes. Existing encryption limits apply.
 * When `connection.password` is empty, WebDAV commands use the saved access
   password if present. When the backup or restore `password` is empty, they

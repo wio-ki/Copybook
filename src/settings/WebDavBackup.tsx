@@ -71,7 +71,7 @@ export function WebDavBackup() {
     setBusy(label);
     setStatus('');
     try {
-      // Only non-secret connection details persist on this computer.
+      // Passwords are handled by the desktop backend. WebView storage gets the account details.
       try {
         const url = new URL(connection.url.trim());
         if (!url.username && !url.password && !url.search && !url.hash) {
@@ -94,22 +94,25 @@ export function WebDavBackup() {
       }
     }
   };
+  const updatePasswordStatus = (kind: WebDavPasswordKind, present: boolean) => {
+    const request = ++statusRequest.current;
+    setStored((previous) => ({
+      key: accountKey,
+      passwords: {
+        access: false,
+        encryption: false,
+        ...(previous?.key === accountKey ? previous.passwords : {}),
+        [kind]: present,
+      },
+    }));
+    void api.webdavPasswordStatus({ url, username, password: '' }).then((passwords) => {
+      if (request === statusRequest.current) setStored({ key: accountKey, passwords });
+    }).catch(() => {});
+  };
   const storePassword = (kind: WebDavPasswordKind, value: string | null) =>
     run(zh ? '正在更新本机凭据…' : 'Updating local credentials…', async () => {
       await api.webdavSavePassword({ url, username, password: '' }, kind, value);
-      const request = ++statusRequest.current;
-      setStored((previous) => ({
-        key: accountKey,
-        passwords: {
-          access: false,
-          encryption: false,
-          ...(previous?.key === accountKey ? previous.passwords : {}),
-          [kind]: value !== null,
-        },
-      }));
-      void api.webdavPasswordStatus({ url, username, password: '' }).then((passwords) => {
-        if (request === statusRequest.current) setStored({ key: accountKey, passwords });
-      }).catch(() => {});
+      updatePasswordStatus(kind, value !== null);
       if (kind === 'access') setConnection((c) => ({ ...c, password: '' }));
       else {
         setPassword('');
@@ -230,8 +233,8 @@ export function WebDavBackup() {
         </fieldset>
         <p className="backup-hint">
           {zh
-            ? '使用 AES-256-GCM 与 Argon2id。恢复时需要原备份密码，遗失后无法找回。文件记录只备份路径，不上传其指向的文件。'
-            : 'Uses AES-256-GCM and Argon2id. Keep your backup password: it cannot be recovered. File records include paths; referenced files are not uploaded.'}
+            ? '成功创建备份后会自动在 Windows 凭据管理器中保存新密码，下次留空即可使用。换设备恢复时请使用原备份密码。文件记录仅备份路径。'
+            : 'After a successful upload, Windows Credential Manager remembers the new backup password. Leave it blank next time. Keep the original password for restores on other devices. File records include only paths.'}
         </p>
         <div className="backup-actions">
           <button className="btn" disabled={!!busy || !hasAccount || !password || !passwordConfirmed || !inTauri}
@@ -251,6 +254,13 @@ export function WebDavBackup() {
               const entry = await api.webdavBackup(connection, password);
               setEntries((current) => [entry, ...(current ?? [])]);
               setSelected(entryKey(entry));
+              if (entry.passwordSaved === true) {
+                updatePasswordStatus('encryption', true);
+                return zh ? '加密备份已上传，密码已保存在本机' : 'Encrypted backup uploaded and password saved locally';
+              }
+              if (entry.passwordSaved === false) {
+                return zh ? '加密备份已上传，但保存新密码失败' : 'Encrypted backup uploaded, but the new password could not be saved';
+              }
               return zh ? '加密备份已上传' : 'Encrypted backup uploaded';
             }, true)
           }

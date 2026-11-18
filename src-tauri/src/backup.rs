@@ -1,5 +1,10 @@
 //! Portable, authenticated, password-encrypted WebDAV backups. No plaintext is written to disk.
-use crate::{model::*, settings::Settings, storage::Storage};
+use crate::{
+    credentials::{self, PasswordKind},
+    model::*,
+    settings::Settings,
+    storage::Storage,
+};
 use aes_gcm::{
     aead::{Aead, KeyInit, Payload},
     Aes256Gcm, Nonce,
@@ -45,6 +50,13 @@ pub struct BackupEntry {
     pub name: String,
     pub bytes: Option<u64>,
     pub legacy: bool,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedBackup {
+    #[serde(flatten)]
+    pub entry: BackupEntry,
+    pub password_saved: Option<bool>,
 }
 #[derive(Debug, Serialize)]
 pub struct RestoreResult {
@@ -575,7 +587,33 @@ fn parse_listing(bytes: &[u8], base: &Url, legacy: bool) -> Result<Vec<BackupEnt
     entries.dedup_by(|a, b| a.name == b.name);
     Ok(entries)
 }
-pub fn upload(connection: &Connection, archive: &Archive, password: &str) -> Result<BackupEntry> {
+pub fn create(
+    connection: &Connection,
+    archive: &Archive,
+    password: Zeroizing<String>,
+) -> Result<CreatedBackup> {
+    let supplied = !password.is_empty();
+    let password = credentials::resolve_encryption(connection, password)?;
+    let entry = upload(connection, archive, &password)?;
+    let password_saved = supplied.then(|| {
+        match credentials::save(connection, PasswordKind::Encryption, Some(password)) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!(
+                    "Backup uploaded but its password could not be saved: {}",
+                    error.code
+                );
+                false
+            }
+        }
+    });
+    Ok(CreatedBackup {
+        entry,
+        password_saved,
+    })
+}
+
+fn upload(connection: &Connection, archive: &Archive, password: &str) -> Result<BackupEntry> {
     let bytes = encrypt(archive, password)?;
     let size = bytes.len() as u64;
     let mut random = [0u8; 8];
@@ -724,13 +762,24 @@ mod tests {
     #[test]
     fn webdav_upload_list_download_and_authentication() {
         use std::{io::BufRead, net::TcpListener, sync::Arc};
+        struct ForgetPassword<'a>(&'a Connection);
+        impl Drop for ForgetPassword<'_> {
+            fn drop(&mut self) {
+                let _ = credentials::save(self.0, PasswordKind::Encryption, None);
+            }
+        }
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
+        let username = format!("copybook-test-{}", std::process::id());
+        let authorization = format!(
+            "Basic {}",
+            STANDARD.encode(format!("{username}:super-secret"))
+        );
         let stored = Arc::new(Mutex::new((String::new(), Vec::<u8>::new())));
         let cloud = stored.clone();
         let server = std::thread::spawn(move || {
             let mut created = false;
-            for _ in 0..11 {
+            for _ in 0..14 {
                 let (mut stream, _) = listener.accept().unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(30)))
@@ -751,9 +800,7 @@ mod tests {
                         length = value.trim().parse().unwrap();
                     }
                     if line.split_once(':').is_some_and(|(name, value)| {
-                        name.eq_ignore_ascii_case("authorization")
-                            && value.trim()
-                                == format!("Basic {}", STANDARD.encode("user:super-secret"))
+                        name.eq_ignore_ascii_case("authorization") && value.trim() == authorization
                     }) {
                         auth = true;
                     }
@@ -808,11 +855,12 @@ mod tests {
                 stream.write_all(&response).unwrap();
             }
         });
-        let mut connection = Connection {
+        let connection = Connection {
             url: format!("http://{addr}/dav/"),
-            username: "user".into(),
+            username,
             password: "super-secret".into(),
         };
+        let _forget = ForgetPassword(&connection);
         let archive = Archive {
             schema: 1,
             settings: Settings::default(),
@@ -820,7 +868,14 @@ mod tests {
             folders: Some(vec![]),
         };
         test_connection(&connection).unwrap();
-        let entry = upload(&connection, &archive, "backup password").unwrap();
+        let created = create(
+            &connection,
+            &archive,
+            Zeroizing::new("backup password".into()),
+        )
+        .unwrap();
+        assert_eq!(created.password_saved, Some(true));
+        let entry = created.entry;
         let entries = list(&connection).unwrap();
         assert_eq!(entries.iter().find(|e| !e.legacy).unwrap().name, entry.name);
         assert_eq!(
@@ -846,8 +901,28 @@ mod tests {
                 .schema,
             1
         );
-        connection.password = "incorrect".into();
-        assert_eq!(list(&connection).err().unwrap().code, "auth");
+        let denied = Connection {
+            url: connection.url.clone(),
+            username: connection.username.clone(),
+            password: "incorrect".into(),
+        };
+        assert_eq!(list(&denied).err().unwrap().code, "auth");
+        assert_eq!(
+            create(
+                &denied,
+                &archive,
+                Zeroizing::new("would replace password".into())
+            )
+            .err()
+            .unwrap()
+            .code,
+            "auth"
+        );
+        let remembered =
+            credentials::resolve_encryption(&connection, Zeroizing::new(String::new())).unwrap();
+        assert!(remembered.as_str() == "backup password");
+        let reused = create(&connection, &archive, Zeroizing::new(String::new())).unwrap();
+        assert_eq!(reused.password_saved, None);
         server.join().unwrap();
     }
 }
