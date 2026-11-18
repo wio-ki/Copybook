@@ -1,4 +1,9 @@
-# Copybook — frontend/backend contract (v1.6.1)
+# Copybook — frontend/backend contract (v1.6.2)
+
+## v1.6.2 rolling cloud backup and selection bookmarks
+
+* New backups PUT the complete encrypted archive to the extensionless file named `copybook` in the configured backup collection. Repeated uploads replace this resource. Existing timestamped backups in both supported collections remain available for restore. List the current file first and display each remote resource once.
+* Multi-select rows display an outlined bookmark. Selected rows show a filled bookmark with a check mark.
 
 ## v1.6.1 backup password and multi-select
 

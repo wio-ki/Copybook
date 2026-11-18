@@ -447,13 +447,16 @@ fn client() -> Result<Client> {
         .build()
         .map_err(|_| network())
 }
+const BACKUP_NAME: &str = "copybook";
+
 fn valid_name(name: &str) -> bool {
-    name.starts_with("copybook-")
-        && name.ends_with(".cpbk")
-        && name.len() < 100
-        && name
-            .bytes()
-            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'.')
+    name == BACKUP_NAME
+        || name.starts_with("copybook-")
+            && name.ends_with(".cpbk")
+            && name.len() < 100
+            && name
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'.')
 }
 fn request(
     connection: &Connection,
@@ -467,7 +470,7 @@ fn request(
         endpoint(connection)?
     };
     if let Some(name) = name {
-        if !valid_name(name) {
+        if !valid_name(name) || (legacy && name == BACKUP_NAME) {
             return Err(CmdError::invalid("Invalid backup filename"));
         }
         url = url.join(name).map_err(|_| invalid())?;
@@ -508,7 +511,12 @@ pub fn list(connection: &Connection) -> Result<Vec<BackupEntry>> {
             entries.extend(legacy);
         }
     }
-    entries.sort_by(|a, b| b.name.cmp(&a.name).then(a.legacy.cmp(&b.legacy)));
+    entries.sort_by(|a, b| {
+        (b.name == BACKUP_NAME)
+            .cmp(&(a.name == BACKUP_NAME))
+            .then(b.name.cmp(&a.name))
+            .then(a.legacy.cmp(&b.legacy))
+    });
     entries.truncate(10000);
     Ok(entries)
 }
@@ -563,7 +571,10 @@ fn parse_listing(bytes: &[u8], base: &Url, legacy: bool) -> Result<Vec<BackupEnt
                     if let Ok(url) = base.join(&href) {
                         if url.origin() == base.origin() && url.path().starts_with(base.path()) {
                             let name = &url.path()[base.path().len()..];
-                            if valid_name(name) && entries.len() < 10000 {
+                            if valid_name(name)
+                                && !(legacy && name == BACKUP_NAME)
+                                && (entries.len() < 10000 || name == BACKUP_NAME)
+                            {
                                 entries.push(BackupEntry {
                                     name: name.to_owned(),
                                     bytes: length,
@@ -616,22 +627,16 @@ pub fn create(
 fn upload(connection: &Connection, archive: &Archive, password: &str) -> Result<BackupEntry> {
     let bytes = encrypt(archive, password)?;
     let size = bytes.len() as u64;
-    let mut random = [0u8; 8];
-    OsRng
-        .try_fill_bytes(&mut random)
-        .map_err(|_| CmdError::internal())?;
-    let name = format!("copybook-{}-{}.cpbk", now_ms(), u64::from_le_bytes(random));
     ensure_collection(connection)?;
     checked(
-        request(connection, Method::PUT, Some(&name), false)?
+        request(connection, Method::PUT, Some(BACKUP_NAME), false)?
             .header("Content-Type", "application/octet-stream")
-            .header("If-None-Match", "*")
             .body(bytes)
             .send()
             .map_err(|_| network())?,
     )?;
     Ok(BackupEntry {
-        name,
+        name: BACKUP_NAME.into(),
         bytes: Some(size),
         legacy: false,
     })
@@ -779,7 +784,8 @@ mod tests {
         let cloud = stored.clone();
         let server = std::thread::spawn(move || {
             let mut created = false;
-            for _ in 0..14 {
+            let mut puts = 0;
+            for _ in 0..18 {
                 let (mut stream, _) = listener.accept().unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(30)))
@@ -796,6 +802,7 @@ mod tests {
                         break;
                     }
                     let lower = line.to_lowercase();
+                    assert!(!lower.starts_with("if-none-match:"));
                     if let Some(value) = lower.strip_prefix("content-length:") {
                         length = value.trim().parse().unwrap();
                     }
@@ -828,10 +835,20 @@ mod tests {
                         .strip_prefix("/dav/copybook/")
                         .unwrap()
                         .to_owned();
+                    assert_eq!(name, "copybook");
                     assert!(body.starts_with(MAGIC));
                     assert!(!body.windows(15).any(|w| w == b"portable secret"));
-                    *cloud.lock().unwrap() = (name, body);
-                    status = "201 Created";
+                    puts += 1;
+                    if puts == 2 {
+                        status = "507 Insufficient Storage";
+                    } else {
+                        *cloud.lock().unwrap() = (name, body);
+                        status = if puts == 1 {
+                            "201 Created"
+                        } else {
+                            "204 No Content"
+                        };
+                    }
                     Vec::new()
                 } else if first.starts_with("PROPFIND ") {
                     let stored = cloud.lock().unwrap();
@@ -877,6 +894,7 @@ mod tests {
         assert_eq!(created.password_saved, Some(true));
         let entry = created.entry;
         let entries = list(&connection).unwrap();
+        assert_eq!(entries[0].name, "copybook");
         assert_eq!(entries.iter().find(|e| !e.legacy).unwrap().name, entry.name);
         assert_eq!(
             entries.iter().find(|e| e.legacy).unwrap().name,
@@ -918,10 +936,33 @@ mod tests {
             .code,
             "auth"
         );
+        assert!(create(
+            &connection,
+            &archive,
+            Zeroizing::new("unsaved password".into())
+        )
+        .is_err());
+        assert_eq!(
+            download(&connection, &entry.name, "backup password", false)
+                .unwrap()
+                .folders,
+            archive.folders
+        );
         let remembered =
             credentials::resolve_encryption(&connection, Zeroizing::new(String::new())).unwrap();
         assert!(remembered.as_str() == "backup password");
-        let reused = create(&connection, &archive, Zeroizing::new(String::new())).unwrap();
+        let updated = Archive {
+            folders: Some(vec!["Newest".into()]),
+            ..archive
+        };
+        let reused = create(&connection, &updated, Zeroizing::new(String::new())).unwrap();
+        assert_eq!(reused.entry.name, entry.name);
+        assert_eq!(
+            download(&connection, "copybook", "backup password", false)
+                .unwrap()
+                .folders,
+            updated.folders
+        );
         assert_eq!(reused.password_saved, None);
         server.join().unwrap();
     }

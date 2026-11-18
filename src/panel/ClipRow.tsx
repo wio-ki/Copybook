@@ -62,9 +62,12 @@ export const ClipRow = memo(function ClipRow(props: RowProps) {
       onDoubleClick={() => { if (!props.multi) props.onPaste(item); }}
       onContextMenu={openMenu}
     >
-      <span className="stamp tnum" aria-hidden="true">
-        {props.multi ? (selected ? '✓' : null) : index < 9 ? index + 1 : ''}
-      </span>
+      {props.multi ? (
+        <svg className="selection-bookmark" viewBox="0 0 20 24" aria-hidden="true" focusable="false">
+          <path className="bookmark-body" d="M4 3h12v17l-6-3.8L4 20z" />
+          {selected && <path className="bookmark-check" d="m6.7 9.8 2.2 2.3 4.5-4.7" />}
+        </svg>
+      ) : <span className="stamp tnum" aria-hidden="true">{index < 9 ? index + 1 : ''}</span>}
 
       <div className="row-body">
         {item.note && !compact && (

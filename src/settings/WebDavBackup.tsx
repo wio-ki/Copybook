@@ -181,8 +181,8 @@ export function WebDavBackup() {
         </fieldset>
         <p className="backup-hint">
           {zh
-            ? '备份自动存放在 copybook/ 子目录。密码可选保存在当前 Windows 用户的凭据管理器中。远程连接使用 HTTPS，本机测试支持 HTTP。'
-            : 'Backups use the copybook/ subfolder. You can save passwords in Windows Credential Manager for this Windows user. HTTPS is required remotely. Loopback HTTP is supported.'}
+            ? '每次备份覆盖 copybook/ 子目录中的同名文件 copybook（无扩展名）。旧版备份仍可恢复。密码可选保存在当前 Windows 用户的凭据管理器中。远程连接使用 HTTPS，本机测试支持 HTTP。'
+            : 'Each backup replaces the file named copybook in the copybook/ subfolder. Older timestamped backups can still be restored. You can save passwords in Windows Credential Manager for this Windows user. HTTPS is required remotely. Loopback HTTP is supported.'}
         </p>
         <div className="backup-actions">
           <button
@@ -252,7 +252,7 @@ export function WebDavBackup() {
           onClick={() =>
             void run(zh ? '正在加密并上传…' : 'Encrypting and uploading…', async () => {
               const entry = await api.webdavBackup(connection, password);
-              setEntries((current) => [entry, ...(current ?? [])]);
+              setEntries((current) => [entry, ...(current ?? []).filter((other) => entryKey(other) !== entryKey(entry))]);
               setSelected(entryKey(entry));
               if (entry.passwordSaved === true) {
                 updatePasswordStatus('encryption', true);

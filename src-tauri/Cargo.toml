@@ -1,6 +1,6 @@
 [package]
 name = "copybook"
-version = "1.6.1"
+version = "1.6.2"
 description = "Clipboard history for Windows"
 edition = "2021"
 license = "MIT"
